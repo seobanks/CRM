@@ -22,7 +22,8 @@ export async function GET(request: Request) {
 
     const istDateStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
     const today = istDateStr; // e.g., '2026-10-08'
-    const autoCheckoutTimeStr = `${today}T19:00:00`; 
+    // Append +05:30 so Supabase knows it means 7:00 PM IST, not 7:00 PM UTC (which is 12:30 AM IST).
+    const autoCheckoutTimeStr = `${today}T19:00:00+05:30`; 
     const autoCheckoutDate = new Date(autoCheckoutTimeStr);
 
     // 🔴 2. FETCH ALL ACTIVE SESSIONS FOR TODAY (IST)

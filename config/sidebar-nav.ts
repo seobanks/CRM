@@ -47,7 +47,6 @@ export const sidebarGroups = [
       { name: "All Leads", href: "/admin/leads", icon: ClipboardList, module: "leads" },
       { name: "Upload Leads", href: "/admin/upload", icon: FileUp, module: "leads" },
       { name: "Available Leads", href: "/admin/calls", icon: Target, module: "dialer" },
-      { name: "Unicorn AI Calling", href: "/unicorn-calling", icon: PhoneOutgoing, PhoneCall, module: "dialer" },
     ]
   },
   {
@@ -74,11 +73,8 @@ export const sidebarGroups = [
       { name: "Reports", href: "/admin/reports", icon: BarChart3, module: "analytics" },
       { name: "Call Reports", href: "/admin/c2c-reports", icon: PhoneCall, module: "analytics" },
       { name: "Disbursed Data", href: "/admin/disbursement-report", icon: IndianRupee, module: "analytics" },
-      { name: "Activities", href: "/admin/audit-logs", icon: Activity, module: "logs" },
       { name: "Logins", href: "/admin/logins", icon: UserCheck, module: "logs" },
       { name: "Wallboard", href: "/admin/wallboard", icon: Presentation, module: "wallboard" },
-      { name: "IVR Campaigns", href: "/admin/ivr-campaigns", icon: Workflow, module: "ivr" },
-      { name: "IVR Configs", href: "/admin/ivr-configs", icon: Settings, module: "ivr" },
       { name: "IVR Upload", href: "/admin/ivr-upload", icon: Upload, module: "ivr" },
       { name: "Files", href: "/admin/master-data", icon: CloudUpload, module: "files" },
     ]
@@ -86,42 +82,8 @@ export const sidebarGroups = [
   {
     label: "System",
     items: [
-      { name: "Automations", href: "/admin/automations", icon: Zap, module: "core" },
       { name: "Settings", href: "/admin/settings", icon: Settings, module: "core" },
       { name: "External Portals", href: "/admin/integrations/portals", icon: Webhook, module: "real_estate" },
-    ]
-  }
-]
-
-export const unicornSidebarGroups = [
-  {
-    label: "Main",
-    items: [
-      { name: "Analytics", href: "/unicorn-calling/dashboard", icon: BarChart, module: "core", exact: true },
-    ]
-  },
-  {
-    label: "AI Calling",
-    items: [
-      { name: "Agent Scripts", href: "/unicorn-calling/scripts", icon: Bot, module: "core" },
-      { name: "Knowledge Base", href: "/unicorn-calling/knowledge-base", icon: Library, module: "core" },
-      { name: "Voice Library", href: "/unicorn-calling/voices", icon: Mic2, module: "core" },
-    ]
-  },
-  {
-    label: "Campaigns",
-    items: [
-      { name: "Auto Campaigns", href: "/unicorn-calling/campaigns", icon: PlaySquare, module: "core" },
-      { name: "Call Logs", href: "/unicorn-calling/logs", icon: History, module: "core" },
-      { name: "Automations", href: "/unicorn-calling/automations", icon: Zap, module: "core" },
-    ]
-  },
-  {
-    label: "Settings",
-    items: [
-      { name: "Integrations", href: "/unicorn-calling/settings", icon: Settings, module: "core" },
-      { name: "Billing", href: "/unicorn-calling/billing", icon: CreditCard, module: "core" },
-      { name: "Back to CRM", href: "/admin", icon: ChevronsLeft, module: "core" },
     ]
   }
 ]

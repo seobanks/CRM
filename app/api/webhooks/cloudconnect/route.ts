@@ -112,7 +112,8 @@ async function handleWebhook(req: Request) {
     // SPAM & LOAD PREVENTION: Drop intermediate/noisy events IMMEDIATELY
     // =========================================================================
     // We KEEP "ringing" (or "ring") because it's required for Agent Screen Pops.
-    const IGNORED_STATUSES = ['dial', 'dialing', 'progress', 'in-progress', 'initiated', 'queued'];
+    // We KEEP "completed" or "hangup" for IVR feedback processing.
+    const IGNORED_STATUSES = ['dial', 'dialing', 'progress', 'in-progress', 'initiated', 'queued', 'on call', 'on-call', 'up', 'answered'];
     if (IGNORED_STATUSES.includes(callStatus.toLowerCase())) {
         console.warn(`[Ozonetel Webhook] Dropping intermediate/spammy status instantly: ${callStatus}`);
         return NextResponse.json({ success: true, message: `Ignored status: ${callStatus}` });

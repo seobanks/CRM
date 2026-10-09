@@ -101,6 +101,21 @@ export async function GET(request: Request) {
     // ============================================================
     for (const tenantId of Object.keys(usersByTenant)) {
       console.log(`🏢 Processing reports for Tenant: ${tenantId}`);
+      
+      // 🔒 IDEMPOTENCY LOCK: Prevent duplicate emails if cron retries
+      const { data: existingLock } = await supabaseAdmin
+        .from('notifications')
+        .select('id')
+        .eq('tenant_id', tenantId)
+        .eq('title', `Daily Report: ${dateStr}`)
+        .limit(1)
+        .maybeSingle();
+
+      if (existingLock) {
+        console.log(`⏭️ Reports already sent for Tenant ${tenantId} today. Skipping to prevent duplicates.`);
+        continue;
+      }
+
       const tenantUsers = usersByTenant[tenantId]
       
       // Identify Roles for this specific tenant
@@ -150,7 +165,7 @@ export async function GET(request: Request) {
         statsMap[u.id] = {
           user: u,
           count: 0, duration: 0, nr: 0, callback: 0, interested: 0, 
-          login: 0, notEligible: 0, notInterested: 0, DISBURSEDCount: 0,
+          login: 0, notEligible: 0, notLogins: 0, notInterested: 0, DISBURSEDCount: 0,
           revenueAchieved: 0
         }
       })
@@ -201,6 +216,8 @@ export async function GET(request: Request) {
       // C. SEND EMAILS FOR THIS TENANT
       // ------------------------------
 
+      let tenantEmailsSent = 0;
+
       // 1. Send "Performance Coach" to Telecallers
       for (const stat of statsArray) {
         const rank = revenueSorted.findIndex((s:any) => s.user.id === stat.user.id) + 1
@@ -215,6 +232,7 @@ export async function GET(request: Request) {
           dateStr
         })
         emailsSent++
+        tenantEmailsSent++
         await delay(100) // Slight delay to respect Resend API limits
       }
 
@@ -236,8 +254,23 @@ export async function GET(request: Request) {
             console.log(`✅ Admin report sent to ${admin.email}. Msg ID: ${data?.id}`)
           }
           emailsSent++
+          tenantEmailsSent++
           await delay(100)
         }
+      }
+
+      // 🔒 SET IDEMPOTENCY LOCK: Record that this tenant's emails are done for today
+      if (tenantEmailsSent > 0) {
+        const firstUserId = admins[0]?.id || staffIds[0];
+        await supabaseAdmin.from('notifications').insert({
+          tenant_id: tenantId,
+          user_id: firstUserId,
+          title: `Daily Report: ${dateStr}`,
+          message: `System successfully generated and sent ${tenantEmailsSent} daily performance emails.`,
+          type: 'system',
+          is_read: false,
+          created_at: new Date().toISOString()
+        });
       }
 
     } // End Tenant Loop

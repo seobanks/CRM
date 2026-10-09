@@ -1,16 +1,1 @@
-{
-  "crons": [
-    {
-      "path": "/api/cron/daily-report",
-      "schedule": "0 2 * * *"
-    },
-    {
-      "path": "/api/cron/smart-notifications",
-      "schedule": "30 9 * * *"
-    },
-    {
-      "path": "/api/cron/auto-checkout",
-      "schedule": "30 13 * * *"
-    }
-  ]
-}
+{}

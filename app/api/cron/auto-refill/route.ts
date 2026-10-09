@@ -9,7 +9,11 @@ export const revalidate = 0;
 export async function GET(request: Request) {
   // 1. CRON SECURITY
   const authHeader = request.headers.get('authorization');
-  if (process.env.NODE_ENV !== 'development' && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  const { searchParams } = new URL(request.url);
+  const queryKey = searchParams.get('key');
+  const secret = process.env.CRON_SECRET;
+
+  if (process.env.NODE_ENV !== 'development' && authHeader !== `Bearer ${secret}` && queryKey !== secret) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

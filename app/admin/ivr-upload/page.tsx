@@ -114,6 +114,12 @@ export default function IvrUploadPage() {
     if (!campaignName.trim()) return toast.error("Campaign Name is required")
     if (!selectedDidId) return toast.error("Please select a DID")
     if (validPhones.length === 0) return toast.error("No valid 10-digit phone numbers found")
+    
+    if (validPhones.length < 5000) {
+      toast.error("Minimum 5,000 numbers required")
+      window.alert("Please add at least minimum 5k numbers to submit an IVR campaign.")
+      return
+    }
 
     setIsSubmitting(true)
     try {

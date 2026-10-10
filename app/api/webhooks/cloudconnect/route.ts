@@ -113,8 +113,9 @@ async function handleWebhook(req: Request) {
     // =========================================================================
     // We KEEP "ringing" (or "ring") because it's required for Agent Screen Pops.
     // We KEEP "completed" or "hangup" for IVR feedback processing.
+    // NOTE: If dtmfInput is present, we NEVER ignore the webhook, regardless of status.
     const IGNORED_STATUSES = ['dial', 'dialing', 'progress', 'in-progress', 'initiated', 'queued', 'on call', 'on-call', 'up', 'answered'];
-    if (IGNORED_STATUSES.includes(callStatus.toLowerCase())) {
+    if (IGNORED_STATUSES.includes(callStatus.toLowerCase()) && !dtmfInput) {
         console.warn(`[Ozonetel Webhook] Dropping intermediate/spammy status instantly: ${callStatus}`);
         return NextResponse.json({ success: true, message: `Ignored status: ${callStatus}` });
     }

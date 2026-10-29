@@ -9,7 +9,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Copy, Download, Share2, Check, Loader2, FileText, Sparkles } from "lucide-react";
+import { Copy, Download, Share2, Check, Loader2, FileText } from "lucide-react";
 import { toast } from "sonner";
 import {
   PerformanceTableRow,
@@ -41,21 +41,27 @@ export function PerformanceTableModal({
 
   // Generate canvas when modal opens
   useEffect(() => {
+    let isMounted = true;
     if (isOpen && rows.length > 0) {
-      try {
-        const canvas = generatePerformanceTableCanvas(rows, {
-          dateLabel,
-          brandName: "BanksCart",
+      generatePerformanceTableCanvas(rows, {
+        dateLabel,
+        brandName: "BanksCart",
+      })
+        .then((canvas) => {
+          if (!isMounted) return;
+          canvasRef.current = canvas;
+          setPreviewDataUrl(canvas.toDataURL("image/png"));
+        })
+        .catch((err) => {
+          console.error("Error generating canvas preview:", err);
         });
-        canvasRef.current = canvas;
-        setPreviewDataUrl(canvas.toDataURL("image/png"));
-      } catch (err) {
-        console.error("Error generating canvas preview:", err);
-      }
     } else {
       setPreviewDataUrl(null);
       canvasRef.current = null;
     }
+    return () => {
+      isMounted = false;
+    };
   }, [isOpen, rows, dateLabel]);
 
   const handleCopyImage = async () => {
@@ -99,12 +105,17 @@ export function PerformanceTableModal({
         <DialogHeader className="pb-3 border-b border-slate-800">
           <div className="flex items-center justify-between">
             <div className="space-y-1">
-              <DialogTitle className="text-xl font-black flex items-center gap-2 text-white">
-                <span className="p-1.5 rounded-lg bg-emerald-600/20 text-emerald-400 border border-emerald-500/30">
-                  <Sparkles className="h-4 w-4" />
-                </span>
-                BanksCart Calling Performance Screenshot
-              </DialogTitle>
+              <div className="flex items-center gap-3">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src="/bankscart-logo.png"
+                  alt="BanksCart.com"
+                  className="h-7 w-auto object-contain bg-white px-2 py-0.5 rounded shadow-xs"
+                />
+                <DialogTitle className="text-lg font-black text-white">
+                  Calling Performance Screenshot
+                </DialogTitle>
+              </div>
               <DialogDescription className="text-xs text-slate-400">
                 Live rendered table with Excel heatmaps and medals. Click <b className="text-emerald-400">Copy Image</b> to paste directly into WhatsApp Web (<kbd className="px-1 py-0.5 rounded bg-slate-800 text-[10px] text-slate-300">Ctrl + V</kbd>).
               </DialogDescription>
@@ -173,7 +184,7 @@ export function PerformanceTableModal({
           ) : (
             <div className="flex flex-col items-center justify-center py-16 space-y-3">
               <Loader2 className="h-6 w-6 text-emerald-500 animate-spin" />
-              <p className="text-xs font-semibold text-slate-400">Rendering high-resolution report card...</p>
+              <p className="text-xs font-semibold text-slate-400">Rendering high-resolution BanksCart report...</p>
             </div>
           )}
         </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import { toast } from "sonner";
+import { BANKSCART_LOGO_BASE64 } from "./bankscart-logo-base64";
 
 export interface PerformanceTableRow {
   name: string;
@@ -48,13 +49,30 @@ export function get3ColorScale(value: number, min: number, max: number): string 
 }
 
 /**
- * Generates an in-memory HTML5 Canvas containing the styled table matching the spreadsheet layout
- * with BanksCart branding, medals for top 3 telecallers, and both Avg Duration + Connect Rate %.
+ * Preloads the BanksCart official logo image from Base64
  */
-export function generatePerformanceTableCanvas(
+function loadLogoImage(): Promise<HTMLImageElement | null> {
+  return new Promise((resolve) => {
+    if (typeof window === "undefined") {
+      resolve(null);
+      return;
+    }
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = BANKSCART_LOGO_BASE64;
+  });
+}
+
+/**
+ * Generates an in-memory HTML5 Canvas containing the styled table matching the spreadsheet layout
+ * with official BanksCart logo, medals for top 3 telecallers, and both Avg Duration + Connect Rate %.
+ */
+export async function generatePerformanceTableCanvas(
   rows: PerformanceTableRow[],
   options?: { dateLabel?: string; brandName?: string }
-): HTMLCanvasElement {
+): Promise<HTMLCanvasElement> {
   const dateLabel = options?.dateLabel || "Today";
   const brandName = "BanksCart";
 
@@ -96,7 +114,7 @@ export function generatePerformanceTableCanvas(
   const colWidths = [190, 110, 120, 125, 115, 110];
   const tableWidth = colWidths.reduce((a, b) => a + b, 0); // 770px
   const padX = 25;
-  const padTop = 110;
+  const padTop = 115;
   const headerHeight = 36;
   const rowHeight = 32;
   const totalsRowHeight = 36;
@@ -105,6 +123,9 @@ export function generatePerformanceTableCanvas(
   const totalLogicalWidth = tableWidth + padX * 2; // 820px
   const totalLogicalHeight =
     padTop + headerHeight + rows.length * rowHeight + totalsRowHeight + padBottom;
+
+  // Preload logo
+  const logoImg = await loadLogoImage();
 
   // Use 2x pixel ratio for crystal clear high-DPI screenshot
   const scale = 2;
@@ -121,44 +142,25 @@ export function generatePerformanceTableCanvas(
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, totalLogicalWidth, totalLogicalHeight);
 
-  // 2. Top Header Banner - Bankscart Branding
-  // Brand Emblem Icon (Rounded gradient square with "B")
-  ctx.save();
-  const iconX = padX;
-  const iconY = 22;
-  const iconSize = 44;
-  if (ctx.roundRect) {
-    ctx.roundRect(iconX, iconY, iconSize, iconSize, 12);
+  // 2. Top Header Banner - Official BanksCart Logo
+  if (logoImg) {
+    // Logo is 616x134 -> rendered at height 44px, width 202px
+    ctx.drawImage(logoImg, padX, 20, 202, 44);
   } else {
-    ctx.fillRect(iconX, iconY, iconSize, iconSize);
+    // Fallback if image fails
+    ctx.fillStyle = "#0284c7";
+    ctx.font = "900 24px system-ui, -apple-system, sans-serif";
+    ctx.fillText("BanksCart.com", padX, 50);
   }
-  const grad = ctx.createLinearGradient(iconX, iconY, iconX + iconSize, iconY + iconSize);
-  grad.addColorStop(0, "#059669"); // Emerald
-  grad.addColorStop(1, "#0d9488"); // Teal
-  ctx.fillStyle = grad;
-  ctx.fill();
 
-  // Draw Letter "B" in Emblem
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "bold 26px system-ui, -apple-system, sans-serif";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText("B", iconX + iconSize / 2, iconY + iconSize / 2 + 1);
-  ctx.restore();
-
-  // Brand Name & Subtitle
-  ctx.fillStyle = "#0f172a";
-  ctx.font = "900 22px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-  ctx.textAlign = "left";
-  ctx.fillText("BANKSCART", iconX + iconSize + 14, 38);
-
-  ctx.fillStyle = "#059669";
+  // Subtitles
+  ctx.fillStyle = "#0284c7";
   ctx.font = "bold 11px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-  ctx.fillText("EXECUTIVE TELECALLER PERFORMANCE REPORT", iconX + iconSize + 14, 54);
+  ctx.fillText("EXECUTIVE TELECALLER PERFORMANCE REPORT", padX, 80);
 
   ctx.fillStyle = "#64748b";
   ctx.font = "500 12px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-  ctx.fillText(`Period: ${dateLabel}  •  ${rows.length} Active Telecallers`, iconX + iconSize + 14, 72);
+  ctx.fillText(`Period: ${dateLabel}  •  ${rows.length} Active Telecallers`, padX, 98);
 
   // Top Right Summary Pill (Total Calls & Connect Rate)
   const totalCallsAll = rows.reduce((s, r) => s + r.totalCalls, 0);
@@ -168,9 +170,9 @@ export function generatePerformanceTableCanvas(
 
   ctx.save();
   const pillW = 240;
-  const pillH = 54;
+  const pillH = 58;
   const pillX = totalLogicalWidth - padX - pillW;
-  const pillY = 22;
+  const pillY = 20;
 
   ctx.fillStyle = "#f8fafc";
   if (ctx.roundRect) {
@@ -186,14 +188,14 @@ export function generatePerformanceTableCanvas(
   ctx.fillStyle = "#0284c7";
   ctx.font = "bold 15px system-ui, -apple-system, sans-serif";
   ctx.textAlign = "center";
-  ctx.fillText(`${totalCallsAll.toLocaleString()} Calls Dialed`, pillX + pillW / 2, pillY + 22);
+  ctx.fillText(`${totalCallsAll.toLocaleString()} Calls Dialed`, pillX + pillW / 2, pillY + 23);
 
   ctx.fillStyle = "#059669";
   ctx.font = "bold 12px system-ui, -apple-system, sans-serif";
   ctx.fillText(
     `⚡ ${totalConnectedAll.toLocaleString()} Connected (${connectRateAll}%)`,
     pillX + pillW / 2,
-    pillY + 41
+    pillY + 44
   );
   ctx.restore();
 
@@ -366,7 +368,7 @@ export function generatePerformanceTableCanvas(
   ctx.font = "11px system-ui, -apple-system, sans-serif";
   ctx.textAlign = "center";
   ctx.fillText(
-    `Generated via BanksCart CRM • Confidential Performance Intelligence`,
+    `Generated via BanksCart.com • Confidential Performance Intelligence`,
     totalLogicalWidth / 2,
     totalLogicalHeight - 16
   );
@@ -398,14 +400,14 @@ export function getPerformanceTableTextCaption(rows: PerformanceTableRow[], date
         .join("\n");
   }
 
-  return `📊 *BANKS CART • CALLING PERFORMANCE REPORT*
+  return `📊 *BANKSCART.COM • CALLING PERFORMANCE REPORT*
 📅 *Period:* ${dateLabel}
 ━━━━━━━━━━━━━━━━━━━━━━
 📞 *Total Calls:* ${totalCallsSum.toLocaleString()}
 ⚡ *Connected:* ${totalConnSum.toLocaleString()} (${connectRate}%)
 ⏱️ *Total Talk Time:* ${formatDurationHMS(totalSecSum)}${topCallersText}
 ━━━━━━━━━━━━━━━━━━━━━━
-_Generated via BanksCart CRM_`;
+_Generated via BanksCart.com_`;
 }
 
 /**
@@ -526,7 +528,7 @@ export async function sharePerformanceTable({
     return false;
   }
 
-  const canvas = generatePerformanceTableCanvas(rows, { dateLabel, brandName });
+  const canvas = await generatePerformanceTableCanvas(rows, { dateLabel, brandName });
   const textCaption = getPerformanceTableTextCaption(rows, dateLabel);
 
   // If on mobile or navigator.share supported, use web share

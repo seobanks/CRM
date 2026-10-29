@@ -28,8 +28,9 @@ import {
   Clock, CheckCircle2, XCircle, ChevronLeft, ChevronRight,
   Building2, Wallet, CalendarDays, Fingerprint, RefreshCw,
   Copy, ExternalLink, MessageSquare, Phone, Filter, Check,
-  AlertTriangle, Users, TrendingUp, Sparkles, CheckCheck
+  AlertTriangle, Users, TrendingUp, Sparkles, CheckCheck, Share2
 } from "lucide-react"
+import { LoginsReportModal } from "@/components/admin/logins-report-modal"
 import { toast } from "sonner"
 import { 
   format, startOfMonth, endOfMonth, subMonths, isSameDay, 
@@ -1336,6 +1337,7 @@ function EditLoginSheet({
 // ======================================================================
 function DailyReportsView({ logins }: { logins: any[] }) {
     const today = new Date()
+    const [isShareOpen, setIsShareOpen] = useState(false)
     const startOfCurrentMonth = startOfMonth(today)
 
     const detailedStats = useMemo(() => {
@@ -1431,12 +1433,23 @@ function DailyReportsView({ logins }: { logins: any[] }) {
 
             {/* Daily Leaderboard */}
             <Card className="shadow-xs border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-2xl overflow-hidden">
-                <CardHeader className="bg-slate-50/70 dark:bg-slate-800/40 border-b border-slate-200/80 dark:border-slate-800 pb-3">
-                    <div className="flex items-center gap-2">
-                        <Trophy className="h-4.5 w-4.5 text-amber-500" />
-                        <CardTitle className="text-sm font-extrabold text-slate-900 dark:text-slate-100">Daily Telecaller Leaderboard</CardTitle>
+                <CardHeader className="bg-slate-50/70 dark:bg-slate-800/40 border-b border-slate-200/80 dark:border-slate-800 pb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div>
+                        <div className="flex items-center gap-2">
+                            <Trophy className="h-4.5 w-4.5 text-amber-500" />
+                            <CardTitle className="text-sm font-extrabold text-slate-900 dark:text-slate-100">Daily Telecaller Leaderboard</CardTitle>
+                        </div>
+                        <CardDescription className="text-xs text-slate-500 mt-0.5">Live breakdown of today&apos;s customer logins by Banks and NBFCs.</CardDescription>
                     </div>
-                    <CardDescription className="text-xs text-slate-500">Live breakdown of today&apos;s customer logins by Banks and NBFCs.</CardDescription>
+                    <Button 
+                        size="sm"
+                        onClick={() => setIsShareOpen(true)}
+                        className="rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs h-8 px-3.5 gap-1.5 shadow-sm self-start sm:self-auto"
+                        title="Share daily screenshot to WhatsApp"
+                    >
+                        <Share2 className="h-3.5 w-3.5" />
+                        <span>Share Screenshot</span>
+                    </Button>
                 </CardHeader>
                 <CardContent className="p-0">
                     <div className="overflow-x-auto">
@@ -1479,6 +1492,14 @@ function DailyReportsView({ logins }: { logins: any[] }) {
                     </div>
                 </CardContent>
             </Card>
+
+            <LoginsReportModal
+                isOpen={isShareOpen}
+                onOpenChange={setIsShareOpen}
+                mode="daily"
+                dailyRows={detailedStats}
+                titleLabel={format(today, "dd MMM yyyy (EEEE)")}
+            />
         </div>
     )
 }
@@ -1494,6 +1515,7 @@ function MonthlyReportsView({
     attendanceData: any[]; 
 }) {
     const [monthOffset, setMonthOffset] = useState(0)
+    const [isShareOpen, setIsShareOpen] = useState(false)
 
     const targetDate = subMonths(new Date(), monthOffset)
     const startOfTargetMonth = startOfMonth(targetDate)
@@ -1577,26 +1599,46 @@ function MonthlyReportsView({
                     </button>
                 </div>
 
-                <div className="flex items-center gap-6 border-l border-slate-150 pl-5">
+                <div className="flex items-center gap-4 sm:gap-6 border-t sm:border-t-0 sm:border-l border-slate-150 pt-3 sm:pt-0 sm:pl-5 w-full sm:w-auto justify-between sm:justify-start">
                     <div>
                         <p className="text-[10px] text-slate-400 uppercase tracking-widest font-extrabold">Total Monthly Logins</p>
                         <p className="text-2xl font-black text-indigo-600 dark:text-indigo-400">{grandTotal}</p>
                     </div>
+                    <Button 
+                        size="sm"
+                        onClick={() => setIsShareOpen(true)}
+                        className="rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs h-9 px-3.5 gap-1.5 shadow-sm"
+                        title="Share monthly screenshot to WhatsApp"
+                    >
+                        <Share2 className="h-3.5 w-3.5" />
+                        <span>Share Report</span>
+                    </Button>
                 </div>
             </div>
 
             {/* Monthly Leaderboard Table */}
             <Card className="shadow-xs border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-2xl overflow-hidden">
-                <CardHeader className="bg-slate-50/70 dark:bg-slate-800/40 border-b border-slate-200/80 dark:border-slate-800 pb-3">
-                    <div className="flex items-center gap-2">
-                        <CalendarDays className="h-4.5 w-4.5 text-indigo-600" />
-                        <CardTitle className="text-sm font-extrabold text-slate-900 dark:text-slate-100">
-                            Monthly Telecaller Performance & Attendance Correlation
-                        </CardTitle>
+                <CardHeader className="bg-slate-50/70 dark:bg-slate-800/40 border-b border-slate-200/80 dark:border-slate-800 pb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div>
+                        <div className="flex items-center gap-2">
+                            <CalendarDays className="h-4.5 w-4.5 text-indigo-600" />
+                            <CardTitle className="text-sm font-extrabold text-slate-900 dark:text-slate-100">
+                                Monthly Telecaller Performance & Attendance Correlation
+                            </CardTitle>
+                        </div>
+                        <CardDescription className="text-xs text-slate-500 mt-0.5">
+                            Evaluates logged applications against verified attendance check-ins for {format(targetDate, "MMMM yyyy")}.
+                        </CardDescription>
                     </div>
-                    <CardDescription className="text-xs text-slate-500">
-                        Evaluates logged applications against verified attendance check-ins for {format(targetDate, "MMMM yyyy")}.
-                    </CardDescription>
+                    <Button 
+                        size="sm"
+                        onClick={() => setIsShareOpen(true)}
+                        className="rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs h-8 px-3.5 gap-1.5 shadow-sm self-start sm:self-auto"
+                        title="Share monthly screenshot to WhatsApp"
+                    >
+                        <Share2 className="h-3.5 w-3.5" />
+                        <span>Share Screenshot</span>
+                    </Button>
                 </CardHeader>
                 <CardContent className="p-0">
                     <div className="overflow-x-auto">
@@ -1646,6 +1688,14 @@ function MonthlyReportsView({
                     </div>
                 </CardContent>
             </Card>
+
+            <LoginsReportModal
+                isOpen={isShareOpen}
+                onOpenChange={setIsShareOpen}
+                mode="monthly"
+                monthlyRows={detailedStats}
+                titleLabel={format(targetDate, "MMMM yyyy")}
+            />
         </div>
     )
 }

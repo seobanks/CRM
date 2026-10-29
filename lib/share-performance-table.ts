@@ -8,10 +8,11 @@ export interface PerformanceTableRow {
   connectedCalls: number;
   totalDurationSeconds: number;
   avgDurationSeconds?: number;
+  connectRate?: number;
 }
 
 /**
- * Format total seconds to H:MM:SS (e.g. 7241 -> "2:00:41", 26 -> "0:00:26")
+ * Format total seconds to H:MM:SS (e.g. 7241 -> "2:00:41", 26 -> "0:00:26", 0 -> "0:00:00")
  */
 export function formatDurationHMS(totalSeconds: number): string {
   if (!totalSeconds || isNaN(totalSeconds) || totalSeconds <= 0) return "0:00:00";
@@ -47,14 +48,15 @@ export function get3ColorScale(value: number, min: number, max: number): string 
 }
 
 /**
- * Generates an in-memory HTML5 Canvas containing the styled table matching the spreadsheet layout.
+ * Generates an in-memory HTML5 Canvas containing the styled table matching the spreadsheet layout
+ * with BanksCart branding, medals for top 3 telecallers, and both Avg Duration + Connect Rate %.
  */
 export function generatePerformanceTableCanvas(
   rows: PerformanceTableRow[],
   options?: { dateLabel?: string; brandName?: string }
 ): HTMLCanvasElement {
   const dateLabel = options?.dateLabel || "Today";
-  const brandName = options?.brandName || "Hanva CRM";
+  const brandName = "BanksCart";
 
   // Min / Max for Heatmap calculations
   const maxCalls = Math.max(...rows.map((r) => r.totalCalls), 1);
@@ -75,18 +77,32 @@ export function generatePerformanceTableCanvas(
     0
   );
 
-  // Column widths matching spreadsheet:
-  // Agent Name, Total Calls, Connected Calls, Total Duration, Connect Rate (Avg Duration)
-  const colWidths = [180, 115, 130, 130, 125];
-  const tableWidth = colWidths.reduce((a, b) => a + b, 0); // 680px
+  const maxRate = Math.max(
+    ...rows.map((r) => (r.totalCalls > 0 ? (r.connectedCalls / r.totalCalls) * 100 : 0)),
+    1
+  );
+  const minRate = Math.min(
+    ...rows.map((r) => (r.totalCalls > 0 ? (r.connectedCalls / r.totalCalls) * 100 : 0)),
+    0
+  );
+
+  // 6 Columns:
+  // 1. Agent Name (with medal icons)
+  // 2. Total Calls (heat-map bg, red text)
+  // 3. Connected Calls (heat-map bg)
+  // 4. Total Talk Time (heat-map bg, H:MM:SS)
+  // 5. Avg Duration (heat-map bg, H:MM:SS)
+  // 6. Connect Rate (heat-map bg, %)
+  const colWidths = [190, 110, 120, 125, 115, 110];
+  const tableWidth = colWidths.reduce((a, b) => a + b, 0); // 770px
   const padX = 25;
-  const padTop = 95;
+  const padTop = 110;
   const headerHeight = 36;
   const rowHeight = 32;
-  const totalsRowHeight = 34;
+  const totalsRowHeight = 36;
   const padBottom = 45;
 
-  const totalLogicalWidth = tableWidth + padX * 2;
+  const totalLogicalWidth = tableWidth + padX * 2; // 820px
   const totalLogicalHeight =
     padTop + headerHeight + rows.length * rowHeight + totalsRowHeight + padBottom;
 
@@ -105,26 +121,62 @@ export function generatePerformanceTableCanvas(
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, totalLogicalWidth, totalLogicalHeight);
 
-  // 2. Top Header Banner
+  // 2. Top Header Banner - Bankscart Branding
+  // Brand Emblem Icon (Rounded gradient square with "B")
+  ctx.save();
+  const iconX = padX;
+  const iconY = 22;
+  const iconSize = 44;
+  if (ctx.roundRect) {
+    ctx.roundRect(iconX, iconY, iconSize, iconSize, 12);
+  } else {
+    ctx.fillRect(iconX, iconY, iconSize, iconSize);
+  }
+  const grad = ctx.createLinearGradient(iconX, iconY, iconX + iconSize, iconY + iconSize);
+  grad.addColorStop(0, "#059669"); // Emerald
+  grad.addColorStop(1, "#0d9488"); // Teal
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Draw Letter "B" in Emblem
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 26px system-ui, -apple-system, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("B", iconX + iconSize / 2, iconY + iconSize / 2 + 1);
+  ctx.restore();
+
+  // Brand Name & Subtitle
   ctx.fillStyle = "#0f172a";
-  ctx.font = "bold 20px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+  ctx.font = "900 22px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
   ctx.textAlign = "left";
-  ctx.fillText("Agent Calling Performance Report", padX, 40);
+  ctx.fillText("BANKSCART", iconX + iconSize + 14, 38);
+
+  ctx.fillStyle = "#059669";
+  ctx.font = "bold 11px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+  ctx.fillText("EXECUTIVE TELECALLER PERFORMANCE REPORT", iconX + iconSize + 14, 54);
 
   ctx.fillStyle = "#64748b";
-  ctx.font = "500 13px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-  ctx.fillText(`Period: ${dateLabel}  •  ${rows.length} Active Telecallers`, padX, 64);
+  ctx.font = "500 12px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+  ctx.fillText(`Period: ${dateLabel}  •  ${rows.length} Active Telecallers`, iconX + iconSize + 14, 72);
 
-  // Top Right Summary Pill
+  // Top Right Summary Pill (Total Calls & Connect Rate)
   const totalCallsAll = rows.reduce((s, r) => s + r.totalCalls, 0);
   const totalConnectedAll = rows.reduce((s, r) => s + r.connectedCalls, 0);
-  const connectRateAll = totalCallsAll > 0 ? Math.round((totalConnectedAll / totalCallsAll) * 100) : 0;
+  const totalDurationAll = rows.reduce((s, r) => s + r.totalDurationSeconds, 0);
+  const connectRateAll = totalCallsAll > 0 ? ((totalConnectedAll / totalCallsAll) * 100).toFixed(1) : "0";
+
+  ctx.save();
+  const pillW = 240;
+  const pillH = 54;
+  const pillX = totalLogicalWidth - padX - pillW;
+  const pillY = 22;
 
   ctx.fillStyle = "#f8fafc";
   if (ctx.roundRect) {
-    ctx.roundRect(totalLogicalWidth - padX - 220, 24, 220, 48, 10);
+    ctx.roundRect(pillX, pillY, pillW, pillH, 12);
   } else {
-    ctx.fillRect(totalLogicalWidth - padX - 220, 24, 220, 48);
+    ctx.fillRect(pillX, pillY, pillW, pillH);
   }
   ctx.fill();
   ctx.strokeStyle = "#e2e8f0";
@@ -134,15 +186,27 @@ export function generatePerformanceTableCanvas(
   ctx.fillStyle = "#0284c7";
   ctx.font = "bold 15px system-ui, -apple-system, sans-serif";
   ctx.textAlign = "center";
-  ctx.fillText(`${totalCallsAll.toLocaleString()} Calls Dialed`, totalLogicalWidth - padX - 110, 44);
+  ctx.fillText(`${totalCallsAll.toLocaleString()} Calls Dialed`, pillX + pillW / 2, pillY + 22);
 
-  ctx.fillStyle = "#10b981";
+  ctx.fillStyle = "#059669";
   ctx.font = "bold 12px system-ui, -apple-system, sans-serif";
-  ctx.fillText(`${totalConnectedAll} Connected (${connectRateAll}%)`, totalLogicalWidth - padX - 110, 62);
+  ctx.fillText(
+    `⚡ ${totalConnectedAll.toLocaleString()} Connected (${connectRateAll}%)`,
+    pillX + pillW / 2,
+    pillY + 41
+  );
+  ctx.restore();
 
   // 3. Table Column Headers
   let currentY = padTop;
-  const colHeaders = ["Agent Name", "Total Calls", "Connected Calls", "Total Duration", "Connect Rate"];
+  const colHeaders = [
+    "Agent Name",
+    "Total Calls",
+    "Connected Calls",
+    "Total Duration",
+    "Avg Duration",
+    "Connect Rate",
+  ];
 
   ctx.fillStyle = "#f1f5f9";
   ctx.fillRect(padX, currentY, tableWidth, headerHeight);
@@ -158,8 +222,8 @@ export function generatePerformanceTableCanvas(
     ctx.font = "bold 12px system-ui, -apple-system, sans-serif";
     ctx.textAlign = idx === 0 ? "left" : "right";
 
-    const textX = idx === 0 ? headerX + 10 : headerX + w - 10;
-    ctx.fillText(title, textX, currentY + 22);
+    const textX = idx === 0 ? headerX + 12 : headerX + w - 10;
+    ctx.fillText(title, textX, currentY + 23);
 
     // Draw vertical column divider
     if (idx > 0) {
@@ -174,8 +238,11 @@ export function generatePerformanceTableCanvas(
 
   currentY += headerHeight;
 
-  // 4. Render Table Rows with Heatmap Colors
-  rows.forEach((row) => {
+  // Medals for top 3 performers
+  const medals = ["🥇", "🥈", "🥉"];
+
+  // 4. Render Table Rows with Heatmap Colors & Medals
+  rows.forEach((row, rowIdx) => {
     const avgDuration =
       row.avgDurationSeconds !== undefined
         ? row.avgDurationSeconds
@@ -183,8 +250,19 @@ export function generatePerformanceTableCanvas(
         ? row.totalDurationSeconds / row.totalCalls
         : 0;
 
+    const rate =
+      row.connectRate !== undefined
+        ? row.connectRate
+        : row.totalCalls > 0
+        ? (row.connectedCalls / row.totalCalls) * 100
+        : 0;
+
+    // Agent Name with medal if top 3
+    const medalPrefix = rowIdx < 3 ? `${medals[rowIdx]} ` : "";
+    const displayName = `${medalPrefix}${row.name}`;
+
     const cells = [
-      { text: row.name, bg: "#ffffff", color: "#0f172a", bold: true, align: "left" },
+      { text: displayName, bg: "#ffffff", color: "#0f172a", bold: true, align: "left" },
       {
         text: String(row.totalCalls),
         bg: get3ColorScale(row.totalCalls, minCalls, maxCalls),
@@ -213,6 +291,13 @@ export function generatePerformanceTableCanvas(
         bold: false,
         align: "right",
       },
+      {
+        text: `${rate.toFixed(1)}%`,
+        bg: get3ColorScale(rate, minRate, maxRate),
+        color: "#0f172a",
+        bold: true,
+        align: "right",
+      },
     ];
 
     let cellX = padX;
@@ -233,7 +318,7 @@ export function generatePerformanceTableCanvas(
       ctx.font = `${cell.bold ? "bold " : "500 "}12px system-ui, -apple-system, sans-serif`;
       ctx.textAlign = cell.align as CanvasTextAlign;
 
-      const textX = cell.align === "left" ? cellX + 10 : cellX + w - 10;
+      const textX = cell.align === "left" ? cellX + 12 : cellX + w - 10;
       ctx.fillText(cell.text, textX, currentY + 21);
 
       cellX += w;
@@ -243,15 +328,15 @@ export function generatePerformanceTableCanvas(
   });
 
   // 5. Grand Totals Row
-  const totalDurationSum = rows.reduce((s, r) => s + r.totalDurationSeconds, 0);
-  const overallAvgDuration = totalCallsAll > 0 ? totalDurationSum / totalCallsAll : 0;
+  const overallAvgDuration = totalCallsAll > 0 ? totalDurationAll / totalCallsAll : 0;
 
   const totalCells = [
     { text: "Total / Team Avg", bg: "#f8fafc", color: "#0f172a", bold: true, align: "left" },
     { text: String(totalCallsAll), bg: "#f8fafc", color: "#991b1b", bold: true, align: "right" },
     { text: String(totalConnectedAll), bg: "#f8fafc", color: "#0f172a", bold: true, align: "right" },
-    { text: formatDurationHMS(totalDurationSum), bg: "#f8fafc", color: "#0f172a", bold: true, align: "right" },
+    { text: formatDurationHMS(totalDurationAll), bg: "#f8fafc", color: "#0f172a", bold: true, align: "right" },
     { text: formatDurationHMS(overallAvgDuration), bg: "#f8fafc", color: "#0f172a", bold: true, align: "right" },
+    { text: `${connectRateAll}%`, bg: "#f8fafc", color: "#0f172a", bold: true, align: "right" },
   ];
 
   let totX = padX;
@@ -268,8 +353,8 @@ export function generatePerformanceTableCanvas(
     ctx.font = "bold 12px system-ui, -apple-system, sans-serif";
     ctx.textAlign = c.align as CanvasTextAlign;
 
-    const textX = c.align === "left" ? totX + 10 : totX + w - 10;
-    ctx.fillText(c.text, textX, currentY + 22);
+    const textX = c.align === "left" ? totX + 12 : totX + w - 10;
+    ctx.fillText(c.text, textX, currentY + 23);
 
     totX += w;
   });
@@ -281,7 +366,7 @@ export function generatePerformanceTableCanvas(
   ctx.font = "11px system-ui, -apple-system, sans-serif";
   ctx.textAlign = "center";
   ctx.fillText(
-    `Generated by ${brandName} • Executive Performance Report`,
+    `Generated via BanksCart CRM • Confidential Performance Intelligence`,
     totalLogicalWidth / 2,
     totalLogicalHeight - 16
   );
@@ -290,13 +375,147 @@ export function generatePerformanceTableCanvas(
 }
 
 /**
- * Triggers native share on mobile/supported browsers with both image + text caption,
- * or downloads image and copies text to clipboard on desktop.
+ * Returns WhatsApp / Text Summary Caption
+ */
+export function getPerformanceTableTextCaption(rows: PerformanceTableRow[], dateLabel = "Today"): string {
+  const totalCallsSum = rows.reduce((s, r) => s + r.totalCalls, 0);
+  const totalConnSum = rows.reduce((s, r) => s + r.connectedCalls, 0);
+  const totalSecSum = rows.reduce((s, r) => s + r.totalDurationSeconds, 0);
+  const connectRate = totalCallsSum > 0 ? ((totalConnSum / totalCallsSum) * 100).toFixed(1) : "0";
+
+  let topCallersText = "";
+  if (rows && rows.length > 0) {
+    const medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"];
+    topCallersText =
+      `\n\n🏆 *TOP CALLERS RANKING:*\n` +
+      rows
+        .slice(0, 5)
+        .map((c, i) => {
+          const medal = medals[i] || `${i + 1}.`;
+          const rate = c.totalCalls > 0 ? Math.round((c.connectedCalls / c.totalCalls) * 100) : 0;
+          return `${medal} *${c.name}*: ${c.totalCalls} calls (${c.connectedCalls} connected • ${rate}%)`;
+        })
+        .join("\n");
+  }
+
+  return `📊 *BANKS CART • CALLING PERFORMANCE REPORT*
+📅 *Period:* ${dateLabel}
+━━━━━━━━━━━━━━━━━━━━━━
+📞 *Total Calls:* ${totalCallsSum.toLocaleString()}
+⚡ *Connected:* ${totalConnSum.toLocaleString()} (${connectRate}%)
+⏱️ *Total Talk Time:* ${formatDurationHMS(totalSecSum)}${topCallersText}
+━━━━━━━━━━━━━━━━━━━━━━
+_Generated via BanksCart CRM_`;
+}
+
+/**
+ * Direct 1-Click Copy Image binary to clipboard (for WhatsApp Web Ctrl+V).
+ */
+export async function copyCanvasImageToClipboard(canvas: HTMLCanvasElement): Promise<boolean> {
+  return new Promise((resolve) => {
+    canvas.toBlob(async (blob) => {
+      if (!blob) {
+        toast.error("Failed to generate image.");
+        resolve(false);
+        return;
+      }
+
+      if (navigator.clipboard && window.ClipboardItem) {
+        try {
+          await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+          toast.success("Image copied! Press Ctrl+V directly in WhatsApp Web 🎉");
+          resolve(true);
+          return;
+        } catch (err) {
+          console.warn("Direct clipboard image copy failed, trying fallback:", err);
+        }
+      }
+
+      // Fallback: Download file
+      downloadCanvasImage(canvas);
+      toast.success("Direct paste not supported by browser. Image downloaded instead!");
+      resolve(true);
+    }, "image/png");
+  });
+}
+
+/**
+ * Downloads canvas as PNG file
+ */
+export function downloadCanvasImage(canvas: HTMLCanvasElement, filename?: string) {
+  canvas.toBlob((blob) => {
+    if (!blob) return;
+    const name = filename || `BanksCart_Performance_${Date.now()}.png`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast.success("Report screenshot downloaded!");
+  }, "image/png");
+}
+
+/**
+ * Triggers native Web Share API (Passes both image file AND text caption)
+ */
+export async function shareCanvasViaWebShare(
+  canvas: HTMLCanvasElement,
+  textCaption: string
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    canvas.toBlob(async (blob) => {
+      if (!blob) {
+        toast.error("Failed to generate report image.");
+        resolve(false);
+        return;
+      }
+
+      const file = new File([blob], `BanksCart_Report_${Date.now()}.png`, { type: "image/png" });
+
+      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({
+            title: "BanksCart Performance Report",
+            text: textCaption,
+            files: [file],
+          });
+          toast.success("Report shared successfully!");
+          resolve(true);
+          return;
+        } catch (err: any) {
+          if (err.name === "AbortError") {
+            resolve(false);
+            return;
+          }
+          console.warn("Web Share API error, falling back:", err);
+        }
+      }
+
+      // Fallback: Download + copy text
+      downloadCanvasImage(canvas);
+      if (navigator.clipboard) {
+        try {
+          await navigator.clipboard.writeText(textCaption);
+          toast.success("Screenshot downloaded & summary text copied to clipboard!");
+        } catch {
+          toast.success("Screenshot downloaded!");
+        }
+      }
+      resolve(true);
+    }, "image/png");
+  });
+}
+
+/**
+ * Legacy entry point: Generates canvas & executes direct share/download
  */
 export async function sharePerformanceTable({
   rows,
   dateLabel = "Today",
-  brandName = "Hanva CRM",
+  brandName = "BanksCart",
 }: {
   rows: PerformanceTableRow[];
   dateLabel?: string;
@@ -307,85 +526,14 @@ export async function sharePerformanceTable({
     return false;
   }
 
-  try {
-    const canvas = generatePerformanceTableCanvas(rows, { dateLabel, brandName });
+  const canvas = generatePerformanceTableCanvas(rows, { dateLabel, brandName });
+  const textCaption = getPerformanceTableTextCaption(rows, dateLabel);
 
-    // Format text caption for WhatsApp / sharing
-    const totalCallsSum = rows.reduce((s, r) => s + r.totalCalls, 0);
-    const totalConnSum = rows.reduce((s, r) => s + r.connectedCalls, 0);
-    const totalSecSum = rows.reduce((s, r) => s + r.totalDurationSeconds, 0);
-    const connectRate = totalCallsSum > 0 ? Math.round((totalConnSum / totalCallsSum) * 100) : 0;
-    const topAgent = rows[0];
-
-    const textCaption = `📊 *${brandName.toUpperCase()} • CALLING PERFORMANCE REPORT*
-📅 *Period:* ${dateLabel}
-━━━━━━━━━━━━━━━━━━━━━━
-📞 *Total Calls:* ${totalCallsSum.toLocaleString()}
-⚡ *Connected:* ${totalConnSum.toLocaleString()} (${connectRate}%)
-⏱️ *Total Talk Time:* ${formatDurationHMS(totalSecSum)}
-👑 *Top Performer:* ${topAgent?.name || "N/A"} (${topAgent?.totalCalls || 0} calls)
-━━━━━━━━━━━━━━━━━━━━━━
-_Generated via ${brandName}_`;
-
-    return new Promise((resolve) => {
-      canvas.toBlob(async (blob) => {
-        if (!blob) {
-          toast.error("Failed to generate report image.");
-          resolve(false);
-          return;
-        }
-
-        const filename = `Calling_Report_${Date.now()}.png`;
-        const file = new File([blob], filename, { type: "image/png" });
-
-        // 1. Try Native Web Share API (Passes both screenshot file AND text data!)
-        if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
-          try {
-            await navigator.share({
-              title: "Calling Performance Report",
-              text: textCaption, // Passes data text alongside the screenshot file!
-              files: [file],
-            });
-            toast.success("Report shared successfully!");
-            resolve(true);
-            return;
-          } catch (err: any) {
-            if (err.name === "AbortError") {
-              // User dismissed the share dialog
-              resolve(false);
-              return;
-            }
-            console.warn("Share API fallback triggering:", err);
-          }
-        }
-
-        // 2. Fallback for Desktop: Download PNG & Copy Text to Clipboard
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-
-        if (navigator.clipboard) {
-          try {
-            await navigator.clipboard.writeText(textCaption);
-            toast.success("Screenshot downloaded & summary text copied to clipboard!");
-          } catch {
-            toast.success("Screenshot downloaded!");
-          }
-        } else {
-          toast.success("Screenshot downloaded!");
-        }
-
-        resolve(true);
-      }, "image/png");
-    });
-  } catch (error) {
-    console.error("Error generating/sharing performance report:", error);
-    toast.error("Could not capture report screenshot.");
-    return false;
+  // If on mobile or navigator.share supported, use web share
+  if (navigator.share && navigator.canShare) {
+    return shareCanvasViaWebShare(canvas, textCaption);
   }
+
+  // If on desktop: copy image directly to clipboard!
+  return copyCanvasImageToClipboard(canvas);
 }

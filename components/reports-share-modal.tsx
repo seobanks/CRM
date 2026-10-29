@@ -1,6 +1,7 @@
 "use client"
 
-import React, { useRef, useState } from "react"
+import React, { useRef, useState, useMemo } from "react"
+import { PerformanceTableModal } from "@/components/admin/performance-table-modal"
 import { 
   Dialog, 
   DialogContent, 
@@ -197,29 +198,25 @@ _Generated via BanksCart CRM_`
     window.open(url, "_blank")
   }
 
-  const handleShareHeatmapTable = async () => {
+  const [showTableModal, setShowTableModal] = useState(false)
+
+  const heatmapRows: PerformanceTableRow[] = useMemo(() => {
+    return (topCallers || []).map((c) => ({
+      name: c.name,
+      totalCalls: c.calls,
+      connectedCalls: c.connected,
+      totalDurationSeconds: c.totalDurationSeconds || 0,
+      avgDurationSeconds: c.avgDurationSeconds || (c.calls > 0 ? (c.totalDurationSeconds || 0) / c.calls : 0),
+      connectRate: c.connectRate,
+    }))
+  }, [topCallers])
+
+  const handleShareHeatmapTable = () => {
     if (!topCallers || topCallers.length === 0) {
       toast.error("No caller performance data available to share.")
       return
     }
-    setIsSharingTable(true)
-    try {
-      const rows: PerformanceTableRow[] = topCallers.map((c) => ({
-        name: c.name,
-        totalCalls: c.calls,
-        connectedCalls: c.connected,
-        totalDurationSeconds: c.totalDurationSeconds || 0,
-        avgDurationSeconds: c.avgDurationSeconds || (c.calls > 0 ? (c.totalDurationSeconds || 0) / c.calls : 0),
-      }))
-
-      await sharePerformanceTable({
-        rows,
-        dateLabel,
-        brandName: "Hanva CRM",
-      })
-    } finally {
-      setIsSharingTable(false)
-    }
+    setShowTableModal(true)
   }
 
   return (
@@ -524,6 +521,12 @@ _Generated via BanksCart CRM_`
             </div>
           </div>
         </div>
+        <PerformanceTableModal
+          isOpen={showTableModal}
+          onOpenChange={setShowTableModal}
+          rows={heatmapRows}
+          dateLabel={dateLabel}
+        />
       </DialogContent>
     </Dialog>
   )

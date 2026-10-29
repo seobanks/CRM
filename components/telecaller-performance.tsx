@@ -4,6 +4,7 @@ import { useEffect, useState, useMemo } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { Badge } from "@/components/ui/badge"
 import { sharePerformanceTable, PerformanceTableRow } from "@/lib/share-performance-table"
+import { PerformanceTableModal } from "@/components/admin/performance-table-modal"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { 
@@ -51,6 +52,7 @@ export function TelecallerPerformance({ startDate, endDate, telecallerId, callTy
   const [sortField, setSortField] = useState<SortField>("calls")
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc")
   const [isSharing, setIsSharing] = useState(false)
+  const [showScreenshotModal, setShowScreenshotModal] = useState(false)
 
   const supabase = createClient()
 
@@ -376,28 +378,21 @@ export function TelecallerPerformance({ startDate, endDate, telecallerId, callTy
     document.body.removeChild(link)
   }
 
-  const handleShareScreenshot = async () => {
-    if (!sortedData || sortedData.length === 0) return
-    setIsSharing(true)
-    try {
-      const rows: PerformanceTableRow[] = sortedData.map((d) => ({
-        name: d.name,
-        totalCalls: d.totalCalls,
-        connectedCalls: d.connectedCalls,
-        totalDurationSeconds: d.totalCallDuration,
-        avgDurationSeconds: d.avgCallDuration,
-      }))
+  const screenshotRows: PerformanceTableRow[] = useMemo(() => {
+    return sortedData.map((d) => ({
+      name: d.name,
+      totalCalls: d.totalCalls,
+      connectedCalls: d.connectedCalls,
+      totalDurationSeconds: d.totalCallDuration,
+      avgDurationSeconds: d.avgCallDuration,
+      connectRate: d.connectRate,
+    }));
+  }, [sortedData]);
 
-      const dateLabel = startDate === endDate ? startDate : `${startDate} to ${endDate}`
-      await sharePerformanceTable({
-        rows,
-        dateLabel,
-        brandName: "Hanva CRM",
-      })
-    } finally {
-      setIsSharing(false)
-    }
-  }
+  const handleShareScreenshot = () => {
+    if (!sortedData || sortedData.length === 0) return;
+    setShowScreenshotModal(true);
+  };
 
   const getPerformanceBadge = (rate: number, type: "connect" | "conversion") => {
     const thresholds = type === "connect" ? [50, 30] : [15, 8]
@@ -712,6 +707,13 @@ export function TelecallerPerformance({ startDate, endDate, telecallerId, callTy
           )}
         </table>
       </div>
+
+      <PerformanceTableModal
+        isOpen={showScreenshotModal}
+        onOpenChange={setShowScreenshotModal}
+        rows={screenshotRows}
+        dateLabel={startDate === endDate ? startDate : `${startDate} to ${endDate}`}
+      />
     </div>
   )
 }

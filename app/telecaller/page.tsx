@@ -158,7 +158,7 @@ export default function TelecallerDashboard() {
         disbursedRes
       ] = await Promise.all([
         supabase.from("leads").select("*", { count: "exact", head: true }).eq("assigned_to", user.id),
-        supabase.from("call_logs").select("*", { count: "exact", head: true }).eq("user_id", user.id).gte("created_at", startOfDay),
+        supabase.from("call_logs").select("*", { count: "exact", head: true }).eq("user_id", user.id).in("call_type", ["outbound", "outbound_c2c"]).gte("created_at", startOfDay),
         supabase.from("follow_ups").select("*", { count: "exact", head: true }).eq("user_id", user.id).eq("status", "pending"),
         supabase.from("follow_ups").select("*", { count: "exact", head: true }).eq("user_id", user.id).eq("status", "completed").gte("completed_at", startOfDay),
         supabase.from("users").select("monthly_target").eq("id", user.id).maybeSingle(),

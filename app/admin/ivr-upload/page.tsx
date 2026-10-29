@@ -488,7 +488,14 @@ export default function IvrUploadPage() {
           <div className="text-2xl sm:text-3xl font-black text-emerald-900 font-mono">
             {totalLeadsFetched.toLocaleString()}
           </div>
-          <p className="text-[11px] text-emerald-600/80 mt-1">Interested caller leads</p>
+          <div className="flex flex-wrap items-center gap-1.5 mt-1">
+            <p className="text-[11px] text-emerald-600/80 font-medium">Interested caller leads</p>
+            <span className="text-slate-300">•</span>
+            <p className="text-[11px] text-amber-600 font-bold flex items-center gap-1">
+              <Coins className="w-3 h-3 text-amber-500" />
+              {(Number((totalLeadsFetched * 1.3).toFixed(1))).toLocaleString()} Credits (@ 1.3/call)
+            </p>
+          </div>
         </div>
 
         {/* Active Campaigns */}
@@ -861,6 +868,7 @@ export default function IvrUploadPage() {
                     <TableHead className="font-bold text-xs uppercase tracking-wide">DID Number</TableHead>
                     <TableHead className="text-center font-bold text-xs uppercase tracking-wide">Uploaded</TableHead>
                     <TableHead className="text-center font-bold text-xs uppercase tracking-wide">Fetched Leads</TableHead>
+                    <TableHead className="text-center font-bold text-xs uppercase tracking-wide">Consumed Credits</TableHead>
                     <TableHead className="font-bold text-xs uppercase tracking-wide">Status</TableHead>
                     <TableHead className="text-right font-bold text-xs uppercase tracking-wide">Actions</TableHead>
                   </TableRow>
@@ -869,6 +877,7 @@ export default function IvrUploadPage() {
                   {filteredHistory.map(h => {
                     const effStatus = getEffectiveStatus(h)
                     const leadsCount = h.meta?.leads_count || 0
+                    const consumedCredits = Number((leadsCount * 1.3).toFixed(1))
                     const minsLeft = h.meta?.last_lead_at 
                       ? Math.max(0, 10 - Math.floor((nowTime - new Date(h.meta.last_lead_at).getTime()) / 60000))
                       : 10
@@ -908,6 +917,15 @@ export default function IvrUploadPage() {
                             <span className="text-xs font-mono text-slate-400">0 leads</span>
                           )}
                         </TableCell>
+                        <TableCell className="text-center">
+                          <span 
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold font-mono bg-amber-50 text-amber-800 border border-amber-200/80 shadow-sm"
+                            title={`${leadsCount} connected calls × 1.3 = ${consumedCredits} credits`}
+                          >
+                            <Coins className="w-3.5 h-3.5 text-amber-500" />
+                            {consumedCredits.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 1 })}
+                          </span>
+                        </TableCell>
                         <TableCell>
                           <Badge className={`text-[10px] uppercase font-bold px-2 py-0.5 border inline-flex items-center gap-1.5 ${statusColor[effStatus] || 'bg-slate-100 text-slate-700'}`}>
                             {effStatus === 'running' && (
@@ -932,7 +950,7 @@ export default function IvrUploadPage() {
                   })}
                   {!loadingHistory && filteredHistory.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={7} className="text-center py-12 text-sm text-slate-500">
+                      <TableCell colSpan={8} className="text-center py-12 text-sm text-slate-500">
                         No IVR upload requests found matching your filters.
                       </TableCell>
                     </TableRow>

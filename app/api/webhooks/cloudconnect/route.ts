@@ -69,7 +69,10 @@ async function handleWebhook(req: Request) {
       }
     }
 
-    const getParam = (key: string) => searchParams.get(key) || bodyData[key] || '';
+    const getParam = (key: string) => {
+      const val = searchParams.get(key) ?? bodyData[key];
+      return val !== undefined && val !== null ? String(val) : '';
+    };
     
     // 0. API Key Verification
     const expectedApiKey = process.env.CLOUDCONNECT_WEBHOOK_SECRET || 'HANVA_OZT_7X9Q2P4L';
@@ -106,7 +109,7 @@ async function handleWebhook(req: Request) {
     const callStatus = getParam('call_status') || getParam('Status') || getParam('status') || getParam('DialStatus') || getParam('CustomerStatus') || ''; 
     const callDirection = getParam('call_direction') || getParam('Direction') || getParam('direction') || getParam('Type') || 'inbound';
     const rawDuration = getParam('call_duration') || getParam('CallDuration') || getParam('Duration') || getParam('duration') || '0';
-    const dtmfInput = getParam('dtmf_input') || getParam('digit') || getParam('AudioInput') || getParam('Input') || '';
+    const dtmfInput = getParam('dtmf_input') || getParam('digit') || getParam('digits') || getParam('AudioInput') || getParam('Input') || getParam('DTMF') || getParam('Dtmf') || getParam('Digits') || '';
     const recordingUrl = getParam('recording_url') || getParam('AudioFile') || getParam('RecordingUrl') || '';
 
     // =========================================================================
@@ -218,8 +221,17 @@ async function handleWebhook(req: Request) {
         // ===== END AGENT EXTENSION ROUTING =====
 
         if (!TARGET_IVR_TENANT_ID) {
-            console.error(`🚨 CRITICAL: CloudConnect Webhook hit without a Tenant ID. Ext:${extensionNumber}, Camp:${campaignName}, DID:${getParam('did')}. Rejecting.`);
-            return NextResponse.json({ status: "error", message: "tenant_id is required" }, { status: 400 });
+            // Safe fallback: Auto-route to BanksCart default tenant if DID is not yet in registry so customer calls are never dropped
+            const { data: defaultOrg } = await supabaseAdmin
+                .from('organizations')
+                .select('id')
+                .eq('is_active', true)
+                .order('created_at', { ascending: true })
+                .limit(1)
+                .maybeSingle();
+
+            TARGET_IVR_TENANT_ID = defaultOrg?.id || '576a6280-a9a2-425c-b1dd-eabfff3a00c6';
+            console.warn(`⚠️ [CloudConnect] Auto-routed unmatched call (DID: ${getParam('did') || campaignName}) to default tenant: ${TARGET_IVR_TENANT_ID}`);
         }
 
     // 1. Find the Lead
@@ -256,7 +268,7 @@ async function handleWebhook(req: Request) {
         }
     }
 
-    // If an existing lead exists and DTMF digit is received, fire the template for tenant 576a6280-a9a2-425c-b1dd-eabfff3a00c6
+    // If an existing lead exists and DTMF digit is received, fire the template
     if (lead && dtmfInput) {
         console.warn(`[Ozonetel Webhook] Existing lead pressed DTMF: ${callerNumber}, digit: ${dtmfInput}`);
         const effectiveTenantId = lead.tenant_id || TARGET_IVR_TENANT_ID;
@@ -266,11 +278,24 @@ async function handleWebhook(req: Request) {
             console.error("[Ozonetel Webhook] Error tracking IVR lead status:", err);
         });
 
-        if (effectiveTenantId === '576a6280-a9a2-425c-b1dd-eabfff3a00c6') {
-            console.warn(`[Ozonetel Webhook] Firing WhatsApp 'application_status_update' for existing DTMF lead in tenant ${effectiveTenantId}: ${callerNumber}`);
-            sendStatusUpdateMessage(lead.id, callerNumber, effectiveTenantId).catch(err => {
+        if (effectiveTenantId) {
+            try {
+                const { data: org } = await supabaseAdmin.from('organizations').select('workflow_triggers').eq('id', effectiveTenantId).maybeSingle();
+                const triggers = org?.workflow_triggers || {};
+                const allowedDigit = triggers.ivr_dtmf_digit || 'any';
+                const cleanInput = String(dtmfInput).trim();
+                const cleanAllowed = String(allowedDigit).trim();
+                const matchesDigit = cleanAllowed === 'any' || cleanAllowed === cleanInput || cleanAllowed.split(',').map((d: string) => d.trim()).includes(cleanInput);
+
+                if (matchesDigit) {
+                    console.warn(`[Ozonetel Webhook] Firing WhatsApp '${triggers.ivr_dtmf_template || 'application_status_update'}' for existing DTMF lead: ${callerNumber}`);
+                    await sendStatusUpdateMessage(lead.id, callerNumber, effectiveTenantId, triggers.ivr_dtmf_template, triggers.ivr_dtmf_campaign);
+                } else {
+                    console.log(`[Ozonetel Webhook] Skipped WhatsApp send: DTMF '${cleanInput}' does not match configured trigger digit '${cleanAllowed}'.`);
+                }
+            } catch (err: any) {
                 console.error("[Ozonetel Webhook] Failed to send WhatsApp status update for existing lead:", err);
-            });
+            }
         }
     }
 
@@ -372,11 +397,25 @@ async function handleWebhook(req: Request) {
             }
 
             // 🚀 FIRE WHATSAPP STATUS UPDATE TEMPLATE IMMEDIATELY
-            console.warn(`[Ozonetel Webhook] Firing WhatsApp 'application_status_update' for new DTMF lead: ${callerNumber}`);
-            // We don't await this so it doesn't block the webhook response
-            sendStatusUpdateMessage(createdLead.id, callerNumber, createdLead.tenant_id).catch(err => {
-                console.error("[Ozonetel Webhook] Failed to send WhatsApp status update:", err);
-            });
+            if (createdLead.tenant_id) {
+                try {
+                    const { data: org } = await supabaseAdmin.from('organizations').select('workflow_triggers').eq('id', createdLead.tenant_id).maybeSingle();
+                    const triggers = org?.workflow_triggers || {};
+                    const allowedDigit = triggers.ivr_dtmf_digit || 'any';
+                    const cleanInput = String(dtmfInput).trim();
+                    const cleanAllowed = String(allowedDigit).trim();
+                    const matchesDigit = cleanAllowed === 'any' || cleanAllowed === cleanInput || cleanAllowed.split(',').map((d: string) => d.trim()).includes(cleanInput);
+
+                    if (matchesDigit) {
+                        console.warn(`[Ozonetel Webhook] Firing WhatsApp '${triggers.ivr_dtmf_template || 'application_status_update'}' for new DTMF lead: ${callerNumber}`);
+                        await sendStatusUpdateMessage(createdLead.id, callerNumber, createdLead.tenant_id, triggers.ivr_dtmf_template, triggers.ivr_dtmf_campaign);
+                    } else {
+                        console.log(`[Ozonetel Webhook] Skipped WhatsApp send: DTMF '${cleanInput}' does not match configured trigger digit '${cleanAllowed}'.`);
+                    }
+                } catch (err: any) {
+                    console.error("[Ozonetel Webhook] Failed to send WhatsApp status update:", err);
+                }
+            }
 
         } else {
             console.error("Failed to create new DTMF lead:", createError);
@@ -463,18 +502,74 @@ async function handleWebhook(req: Request) {
             console.warn(`[Ozonetel Webhook] No lead found to attach this call log to.`);
         }
 
+        let savedCallLogId = existingLog?.id || null;
+
         if (existingLog) {
             console.warn(`[Ozonetel Webhook] Updating existing call log ID: ${existingLog.id}`);
             const { error: updateError } = await supabaseAdmin.from('call_logs').update(logData).eq('id', existingLog.id);
             if (updateError) console.error(`[Ozonetel Webhook] Error updating call log:`, updateError);
         } else {
+            if (!callLogUserId && TARGET_IVR_TENANT_ID) {
+                const { data: fallbackUser } = await supabaseAdmin
+                    .from('users')
+                    .select('id')
+                    .eq('tenant_id', TARGET_IVR_TENANT_ID)
+                    .limit(1)
+                    .maybeSingle();
+                callLogUserId = fallbackUser?.id || null;
+                if (callLogUserId) {
+                    logData.user_id = callLogUserId;
+                }
+            }
+
             if (!callLogUserId) {
                 console.warn(`[Ozonetel Webhook] Skipping call_logs insert because user_id is required and no agent was matched.`);
                 return NextResponse.json({ success: true, message: 'Call processed but skipped call_logs insert (No Agent)' });
             }
             console.warn(`[Ozonetel Webhook] Inserting new call log.`);
-            const { error: insertError } = await supabaseAdmin.from('call_logs').insert([logData]);
-            if (insertError) console.error(`[Ozonetel Webhook] Error inserting call log:`, insertError);
+            const { data: insertedData, error: insertError } = await supabaseAdmin.from('call_logs').insert([logData]).select('id').single();
+            if (insertError) {
+                console.error(`[Ozonetel Webhook] Error inserting call log:`, insertError);
+            } else if (insertedData) {
+                savedCallLogId = insertedData.id;
+            }
+        }
+
+        // 🔴 4. CREDIT DEDUCTION FOR CONNECTED OZONETEL CALLS (1.3 credits per connected call)
+        const effectiveTenantId = logData.tenant_id;
+        const isConnected = callDurationSeconds > 0 && ['answered', 'completed', 'success'].includes((callStatus || '').toLowerCase());
+
+        if (effectiveTenantId && isConnected && savedCallLogId) {
+            // Idempotency check: ensure not already billed
+            const { data: alreadyBilled } = await supabaseAdmin
+                .from('wallet_ledger')
+                .select('id')
+                .eq('reference_id', savedCallLogId)
+                .maybeSingle();
+
+            if (!alreadyBilled) {
+                const creditsToDeduct = 1.3;
+
+                const { error: ledgerError } = await supabaseAdmin.from('wallet_ledger').insert({
+                    tenant_id: effectiveTenantId,
+                    credits: -creditsToDeduct,
+                    transaction_type: 'OZONETEL_CALL',
+                    description: `Ozonetel Connected Call to ${callerNumber} (Duration: ${callDurationSeconds}s @ 1.3 credits/call)`,
+                    reference_id: savedCallLogId
+                });
+
+                if (!ledgerError) {
+                    console.warn(`🪙 [Ozonetel Wallet] Deducted ${creditsToDeduct} credits from Tenant ${effectiveTenantId} for Call Log ${savedCallLogId}`);
+                    await supabaseAdmin
+                        .from('call_logs')
+                        .update({ credits_used: creditsToDeduct, talk_time_seconds: callDurationSeconds })
+                        .eq('id', savedCallLogId);
+                } else {
+                    console.error(`🚨 [Ozonetel Wallet Error] Failed to deduct credits:`, ledgerError);
+                }
+            } else {
+                console.warn(`⏩ [Ozonetel Wallet] Call ${savedCallLogId} already billed. Skipping duplicate deduction.`);
+            }
         }
 
         console.warn(`[Ozonetel Webhook] Finished processing successfully.`);

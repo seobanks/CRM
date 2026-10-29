@@ -49,19 +49,27 @@ export class AttendanceService {
         console.warn("Could not fetch IP", e);
     }
 
+    const { data: userProfile } = await supabase.from('users').select('tenant_id').eq('id', userId).maybeSingle();
+    const tenantId = userProfile?.tenant_id;
+
+    const upsertPayload: any = {
+      user_id: userId,
+      date: new Date().toISOString().split("T")[0],
+      check_in: now,
+      status: "present",
+      notes: notes || null,
+      updated_at: now,
+      location_check_in: location ? { coordinates: location } : null,
+      ip_check_in: ipAddress
+    };
+    if (tenantId) {
+      upsertPayload.tenant_id = tenantId;
+    }
+
     const { data, error } = await supabase
       .from("attendance")
       .upsert(
-        {
-          user_id: userId,
-          date: new Date().toISOString().split("T")[0],
-          check_in: now,
-          status: "present",
-          notes: notes || null,
-          updated_at: now,
-          location_check_in: location ? { coordinates: location } : null,
-          ip_check_in: ipAddress
-        },
+        upsertPayload,
         {
           onConflict: "user_id, date",
         },

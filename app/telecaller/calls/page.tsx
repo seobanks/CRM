@@ -42,8 +42,13 @@ export default async function CallHistoryPage({
   if (searchParams.follow_up === "true") {
     query = query.eq("follow_up_required", true)
   }
-  if (searchParams.call_type && searchParams.call_type !== "all") {
-    query = query.eq("call_type", searchParams.call_type)
+  if (searchParams.call_type === "outbound") {
+    query = query.eq("call_type", "outbound")
+  } else if (searchParams.call_type === "outbound_c2c" || searchParams.call_type === "c2c") {
+    query = query.eq("call_type", "outbound_c2c")
+  } else {
+    // Only show outbound and C2C calls
+    query = query.in("call_type", ["outbound", "outbound_c2c"])
   }
 
   const { data: callLogs, error } = await query.order("created_at", { ascending: false })

@@ -27,12 +27,14 @@ export function MyPerformanceChart({ userId }: { userId: string }) {
               .from("call_logs")
               .select("*", { count: "exact", head: true })
               .eq("user_id", userId)
+              .in("call_type", ["outbound", "outbound_c2c"])
               .gte("created_at", date)
               .lt("created_at", `${date}T23:59:59`),
             supabase
               .from("call_logs")
               .select("*", { count: "exact", head: true })
               .eq("user_id", userId)
+              .in("call_type", ["outbound", "outbound_c2c"])
               .eq("call_status", "connected")
               .gte("created_at", date)
               .lt("created_at", `${date}T23:59:59`),

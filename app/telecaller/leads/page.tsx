@@ -17,6 +17,8 @@ interface SearchParams {
   search?: string
   source?: string
   date_range?: string
+  from?: string
+  to?: string
   page?: string
   sort_by?: string
   sort_order?: string
@@ -69,6 +71,33 @@ export default async function TelecallerLeadsPage({
   if (searchParams.priority && searchParams.priority !== "all") query = query.eq("priority", searchParams.priority)
   if (searchParams.search) {
     query = query.or(`name.ilike.%${searchParams.search}%,email.ilike.%${searchParams.search}%,phone.ilike.%${searchParams.search}%,company.ilike.%${searchParams.search}%`)
+  }
+
+  // 📅 DATE FILTERING (Created Date)
+  if (searchParams.date_range && searchParams.date_range !== "all") {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+
+    if (searchParams.date_range === "today") {
+      query = query.gte("created_at", today.toISOString())
+    } else if (searchParams.date_range === "yesterday") {
+      const yesterday = new Date(today)
+      yesterday.setDate(yesterday.getDate() - 1)
+      query = query.gte("created_at", yesterday.toISOString()).lt("created_at", today.toISOString())
+    } else if (searchParams.date_range === "this_week") {
+      const startOfWeek = new Date(today)
+      startOfWeek.setDate(startOfWeek.getDate() - 7)
+      query = query.gte("created_at", startOfWeek.toISOString())
+    } else if (searchParams.date_range === "this_month") {
+      const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1)
+      query = query.gte("created_at", startOfMonth.toISOString())
+    } else if (searchParams.date_range === "custom" && searchParams.from) {
+      const fromDate = new Date(searchParams.from)
+      fromDate.setHours(0, 0, 0, 0)
+      const toDate = searchParams.to ? new Date(searchParams.to) : new Date(fromDate)
+      toDate.setHours(23, 59, 59, 999)
+      query = query.gte("created_at", fromDate.toISOString()).lte("created_at", toDate.toISOString())
+    }
   }
 
   const { data: leads, count } = await query

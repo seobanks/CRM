@@ -11,6 +11,7 @@ import { LeadConversionChart } from "@/components/lead-conversion-chart"
 import { LeadConversionFunnel } from "@/components/lead-conversion-funnel"
 import { TelecallerPerformance } from "@/components/telecaller-performance"
 import { ExportButtons } from "@/components/export-buttons"
+import { ReportsShareModal } from "@/components/reports-share-modal"
 import { RevenueForecastChart } from "@/components/revenue-forecast-chart"
 import { LeadSourceROIChart } from "@/components/lead-source-roi-chart"
 import Link from "next/link"
@@ -129,9 +130,7 @@ export default async function ReportsPage({
     }
 
     // Call Type filter
-    if (callType === "agent") {
-      callsQuery = callsQuery.in('call_type', ['outbound', 'outbound_c2c'])
-    } else if (callType === "outbound") {
+    if (callType === "outbound") {
       callsQuery = callsQuery.eq('call_type', 'outbound')
     } else if (callType === "c2c") {
       callsQuery = callsQuery.eq('call_type', 'outbound_c2c')
@@ -139,6 +138,8 @@ export default async function ReportsPage({
       callsQuery = callsQuery.eq('call_type', 'ivr')
     } else if (callType === "inbound") {
       callsQuery = callsQuery.eq('call_type', 'inbound')
+    } else {
+      callsQuery = callsQuery.in('call_type', ['outbound', 'outbound_c2c'])
     }
 
     if (filterId) {
@@ -221,11 +222,15 @@ export default async function ReportsPage({
   ])
 
   // 6. Calculate Top Performer
-  const winnerMap: Record<string, { calls: number; connected: number }> = {}
+  const winnerMap: Record<string, { calls: number; connected: number; duration: number }> = {}
+  telecallers?.forEach((t: any) => {
+    winnerMap[t.id] = { calls: 0, connected: 0, duration: 0 }
+  })
   current.callsList.forEach((c: any) => {
     if (!c.user_id) return
-    if (!winnerMap[c.user_id]) winnerMap[c.user_id] = { calls: 0, connected: 0 }
+    if (!winnerMap[c.user_id]) winnerMap[c.user_id] = { calls: 0, connected: 0, duration: 0 }
     winnerMap[c.user_id].calls += 1
+    winnerMap[c.user_id].duration += Number(c.duration_seconds) || 0
 
     const st = (c.call_status || "").toLowerCase()
     const disp = (c.disposition || "").toUpperCase()
@@ -262,6 +267,22 @@ export default async function ReportsPage({
 
   const topPerformerName = telecallers?.find((t: any) => t.id === topPerformerId)?.full_name || "N/A"
   const topPerformerConnectRate = topPerformerCalls > 0 ? ((topPerformerConnected / topPerformerCalls) * 100).toFixed(0) : "0"
+
+  const topCallersList = Object.entries(winnerMap)
+    .map(([userId, stats]) => {
+      const agent = telecallers?.find((t: any) => t.id === userId)
+      const connectRate = stats.calls > 0 ? Math.round((stats.connected / stats.calls) * 100) : 0
+      return {
+        id: userId,
+        name: agent?.full_name || "Unknown Agent",
+        calls: stats.calls,
+        connected: stats.connected,
+        connectRate,
+        totalDurationSeconds: stats.duration,
+        avgDurationSeconds: stats.calls > 0 ? Math.round(stats.duration / stats.calls) : 0,
+      }
+    })
+    .sort((a, b) => b.calls - a.calls)
 
   // 7. Trends and Rates
   const calculateTrend = (curr: number, prev: number) => {
@@ -390,6 +411,26 @@ export default async function ReportsPage({
         </div>
 
         <div className="flex items-center gap-3">
+          <ReportsShareModal
+            startDate={startDate}
+            endDate={endDate}
+            isToday={isToday}
+            isSingleDay={isSingleDay}
+            callType={callType}
+            totalCalls={current.calls}
+            connectedCalls={current.connected}
+            connectRate={currentConnectRate}
+            totalLeads={current.leads}
+            qualifiedLeads={current.qualified}
+            wonLeads={current.won}
+            conversionRate={currentConvRate}
+            totalDurationSeconds={current.duration}
+            topPerformerName={topPerformerName}
+            topPerformerCalls={topPerformerCalls}
+            topPerformerConnected={topPerformerConnected}
+            topPerformerConnectRate={topPerformerConnectRate}
+            topCallers={topCallersList}
+          />
           <ExportButtons startDate={startDate} endDate={endDate} telecallerId={filterId} callType={callType} />
         </div>
       </div>

@@ -112,6 +112,7 @@ export async function GET(request: Request) {
       .select('user_id, call_status', { count: 'exact' })
       .in('tenant_id', enabledTenantIds)
       .in('user_id', staffIds)
+      .in('call_type', ['outbound', 'outbound_c2c'])
       .gte('created_at', startOfYesterday)
       .lte('created_at', endOfYesterday)
 

@@ -3,11 +3,12 @@
 import { useEffect, useState, useMemo } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { Badge } from "@/components/ui/badge"
+import { sharePerformanceTable, PerformanceTableRow } from "@/lib/share-performance-table"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { 
   CheckCircle, Minus, Clock, Search, ArrowUpDown, 
-  Download, Trophy
+  Download, Trophy, Share2, Loader2
 } from "lucide-react"
 
 interface PerformanceData {
@@ -49,6 +50,7 @@ export function TelecallerPerformance({ startDate, endDate, telecallerId, callTy
   const [searchQuery, setSearchQuery] = useState("")
   const [sortField, setSortField] = useState<SortField>("calls")
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc")
+  const [isSharing, setIsSharing] = useState(false)
 
   const supabase = createClient()
 
@@ -132,17 +134,17 @@ export function TelecallerPerformance({ startDate, endDate, telecallerId, callTy
         }
 
         // Apply Call Channel Filter
-        if (callType === "agent") {
-          callsQuery = callsQuery.in('call_type', ['outbound', 'outbound_c2c'])
-        } else if (callType === "outbound") {
-          callsQuery = callsQuery.eq('call_type', 'outbound')
-        } else if (callType === "c2c") {
-          callsQuery = callsQuery.eq('call_type', 'outbound_c2c')
-        } else if (callType === "ivr") {
-          callsQuery = callsQuery.eq('call_type', 'ivr')
-        } else if (callType === "inbound") {
-          callsQuery = callsQuery.eq('call_type', 'inbound')
-        }
+        if (callType === "outbound") {
+      callsQuery = callsQuery.eq('call_type', 'outbound')
+    } else if (callType === "c2c") {
+      callsQuery = callsQuery.eq('call_type', 'outbound_c2c')
+    } else if (callType === "ivr") {
+      callsQuery = callsQuery.eq('call_type', 'ivr')
+    } else if (callType === "inbound") {
+      callsQuery = callsQuery.eq('call_type', 'inbound')
+    } else {
+      callsQuery = callsQuery.in('call_type', ['outbound', 'outbound_c2c'])
+    }
 
         const [
           { data: telecallers },
@@ -374,6 +376,29 @@ export function TelecallerPerformance({ startDate, endDate, telecallerId, callTy
     document.body.removeChild(link)
   }
 
+  const handleShareScreenshot = async () => {
+    if (!sortedData || sortedData.length === 0) return
+    setIsSharing(true)
+    try {
+      const rows: PerformanceTableRow[] = sortedData.map((d) => ({
+        name: d.name,
+        totalCalls: d.totalCalls,
+        connectedCalls: d.connectedCalls,
+        totalDurationSeconds: d.totalCallDuration,
+        avgDurationSeconds: d.avgCallDuration,
+      }))
+
+      const dateLabel = startDate === endDate ? startDate : `${startDate} to ${endDate}`
+      await sharePerformanceTable({
+        rows,
+        dateLabel,
+        brandName: "Hanva CRM",
+      })
+    } finally {
+      setIsSharing(false)
+    }
+  }
+
   const getPerformanceBadge = (rate: number, type: "connect" | "conversion") => {
     const thresholds = type === "connect" ? [50, 30] : [15, 8]
     if (rate >= thresholds[0]) {
@@ -432,6 +457,16 @@ export function TelecallerPerformance({ startDate, endDate, telecallerId, callTy
           >
             <Download className="h-3.5 w-3.5" />
             Export Table CSV
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleShareScreenshot}
+            disabled={isSharing}
+            className="h-9 text-xs font-bold rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800 dark:hover:bg-emerald-900/60 flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer"
+          >
+            {isSharing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Share2 className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />}
+            {isSharing ? "Generating..." : "Share Screenshot"}
           </Button>
         </div>
       </div>

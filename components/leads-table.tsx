@@ -21,6 +21,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
 import { LeadStatusDialog } from "@/components/lead-status-dialog"
+import { classifySentiment } from "@/components/lead-status-updater"
 import { sendBulkCampaign } from "@/app/actions/campaigns"
 import { toast } from "sonner"
 import { QuickActions } from "@/components/quick-actions"
@@ -1017,9 +1018,11 @@ export function LeadsTable({ leads = [], telecallers = [], telecallerStatus = {}
         .eq("id", leadId)
 
       if (error) throw error
+      toast.success("Lead status updated successfully")
       router.refresh()
     } catch (error) {
       console.error("Error changing lead status:", error)
+      toast.error("Failed to update lead status")
     }
   }
 

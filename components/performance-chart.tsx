@@ -66,17 +66,17 @@ export function PerformanceChart({ startDate, endDate, telecallerId, callType = 
         }
 
         // Call Type Filter
-        if (callType === "agent") {
-          callsQuery = callsQuery.in('call_type', ['outbound', 'outbound_c2c'])
-        } else if (callType === "outbound") {
-          callsQuery = callsQuery.eq('call_type', 'outbound')
-        } else if (callType === "c2c") {
-          callsQuery = callsQuery.eq('call_type', 'outbound_c2c')
-        } else if (callType === "ivr") {
-          callsQuery = callsQuery.eq('call_type', 'ivr')
-        } else if (callType === "inbound") {
-          callsQuery = callsQuery.eq('call_type', 'inbound')
-        }
+        if (callType === "outbound") {
+      callsQuery = callsQuery.eq('call_type', 'outbound')
+    } else if (callType === "c2c") {
+      callsQuery = callsQuery.eq('call_type', 'outbound_c2c')
+    } else if (callType === "ivr") {
+      callsQuery = callsQuery.eq('call_type', 'ivr')
+    } else if (callType === "inbound") {
+      callsQuery = callsQuery.eq('call_type', 'inbound')
+    } else {
+      callsQuery = callsQuery.in('call_type', ['outbound', 'outbound_c2c'])
+    }
 
         if (telecallerId) {
           const ids = telecallerId.split(',').filter(Boolean)

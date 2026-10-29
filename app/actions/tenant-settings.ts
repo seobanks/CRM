@@ -80,10 +80,24 @@ export async function getWorkspaceSettings() {
             throw error;
         }
 
+        // Fetch workflow_triggers from organizations for IVR DTMF automation settings
+        const { data: orgData } = await supabaseAdmin
+            .from('organizations')
+            .select('workflow_triggers')
+            .eq('id', tenantId)
+            .maybeSingle();
+
+        const workflowTriggers = orgData?.workflow_triggers || {};
+
         return {
             success: true,
             tenantId,
-            data: data || null
+            data: {
+                ...(data || {}),
+                ivr_dtmf_template: workflowTriggers.ivr_dtmf_template || 'application_status_update',
+                ivr_dtmf_campaign: workflowTriggers.ivr_dtmf_campaign || 'StatusUpdateAlert',
+                ivr_dtmf_digit: workflowTriggers.ivr_dtmf_digit || 'any',
+            }
         };
     } catch (error: any) {
         console.error("Get Settings Error:", error);
@@ -109,6 +123,9 @@ export async function updateWorkspaceSettings(formData: {
     cron_smart_notifications: boolean;
     unicorn_api_key: string;
     ivr_digit_auto_assign: boolean;
+    ivr_dtmf_template?: string;
+    ivr_dtmf_campaign?: string;
+    ivr_dtmf_digit?: string;
 }) {
     try {
         const supabase = await createClient()
@@ -150,7 +167,40 @@ export async function updateWorkspaceSettings(formData: {
             throw error;
         }
 
-        return { success: true, message: "Workspace settings updated successfully!", data }
+        // 3. Save IVR DTMF workflow configuration into organizations.workflow_triggers
+        const { data: orgData } = await supabaseAdmin
+            .from('organizations')
+            .select('workflow_triggers')
+            .eq('id', tenantId)
+            .maybeSingle();
+
+        const currentTriggers = orgData?.workflow_triggers || {};
+        const updatedTriggers = {
+            ...currentTriggers,
+            ivr_dtmf_template: formData.ivr_dtmf_template || 'application_status_update',
+            ivr_dtmf_campaign: formData.ivr_dtmf_campaign || 'StatusUpdateAlert',
+            ivr_dtmf_digit: formData.ivr_dtmf_digit || 'any'
+        };
+
+        const { error: orgError } = await supabaseAdmin
+            .from('organizations')
+            .update({ workflow_triggers: updatedTriggers })
+            .eq('id', tenantId);
+
+        if (orgError) {
+            console.error("Error saving workflow_triggers in organizations:", orgError);
+        }
+
+        return { 
+            success: true, 
+            message: "Workspace settings updated successfully!", 
+            data: {
+                ...data,
+                ivr_dtmf_template: updatedTriggers.ivr_dtmf_template,
+                ivr_dtmf_campaign: updatedTriggers.ivr_dtmf_campaign,
+                ivr_dtmf_digit: updatedTriggers.ivr_dtmf_digit
+            } 
+        }
 
     } catch (error: any) {
         console.error("Settings Update Error:", error)

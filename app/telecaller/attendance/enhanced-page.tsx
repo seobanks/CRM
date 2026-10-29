@@ -184,7 +184,7 @@ export default function EnhancedTelecallerAttendancePage() {
     if (getDay(dateObj) === 0) return { isHoliday: true, name: "Sunday" };
 
     // 3. Check Second Saturday (Read from localStorage to match Admin settings)
-    const enableSecondSat = JSON.parse(localStorage.getItem('enableSecondSaturdayHoliday') || 'false');
+    const enableSecondSat = typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('enableSecondSaturdayHoliday') || 'false') : false;
     if (enableSecondSat && getDay(dateObj) === 6) {
       const dateNum = getDate(dateObj);
       if (dateNum >= 8 && dateNum <= 14) return { isHoliday: true, name: "Second Saturday" };

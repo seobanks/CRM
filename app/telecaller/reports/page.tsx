@@ -36,11 +36,13 @@ export default async function TelecallerReportsPage() {
       .from("call_logs")
       .select("*", { count: "exact", head: true })
       .eq("user_id", user.id)
+      .in("call_type", ["outbound", "outbound_c2c"])
       .gte("created_at", thirtyDaysAgo),
     supabase
       .from("call_logs")
       .select("*", { count: "exact", head: true })
       .eq("user_id", user.id)
+      .in("call_type", ["outbound", "outbound_c2c"])
       .neq("disposition", "NR")
       .gte("created_at", thirtyDaysAgo),
     supabase
@@ -53,6 +55,7 @@ export default async function TelecallerReportsPage() {
       .from("call_logs")
       .select("*", { count: "exact", head: true })
       .eq("user_id", user.id)
+      .in("call_type", ["outbound", "outbound_c2c"])
       .gte("created_at", today),
   ])
 

@@ -150,17 +150,17 @@ export function ExportButtons({ startDate, endDate, telecallerId, callType = "ag
       }
 
       // Call Type filter
-      if (callType === "agent") {
-        query = query.in('call_type', ['outbound', 'outbound_c2c'])
-      } else if (callType === "outbound") {
-        query = query.eq('call_type', 'outbound')
-      } else if (callType === "c2c") {
-        query = query.eq('call_type', 'outbound_c2c')
-      } else if (callType === "ivr") {
-        query = query.eq('call_type', 'ivr')
-      } else if (callType === "inbound") {
-        query = query.eq('call_type', 'inbound')
-      }
+      if (callType === "outbound") {
+      query = query.eq('call_type', 'outbound')
+    } else if (callType === "c2c") {
+      query = query.eq('call_type', 'outbound_c2c')
+    } else if (callType === "ivr") {
+      query = query.eq('call_type', 'ivr')
+    } else if (callType === "inbound") {
+      query = query.eq('call_type', 'inbound')
+    } else {
+      query = query.in('call_type', ['outbound', 'outbound_c2c'])
+    }
 
       if (telecallerId) {
         const ids = telecallerId.split(',').filter(Boolean)
@@ -280,17 +280,17 @@ export function ExportButtons({ startDate, endDate, telecallerId, callType = "ag
       }
 
       // Call Type filter
-      if (callType === "agent") {
-        callsQuery = callsQuery.in('call_type', ['outbound', 'outbound_c2c'])
-      } else if (callType === "outbound") {
-        callsQuery = callsQuery.eq('call_type', 'outbound')
-      } else if (callType === "c2c") {
-        callsQuery = callsQuery.eq('call_type', 'outbound_c2c')
-      } else if (callType === "ivr") {
-        callsQuery = callsQuery.eq('call_type', 'ivr')
-      } else if (callType === "inbound") {
-        callsQuery = callsQuery.eq('call_type', 'inbound')
-      }
+      if (callType === "outbound") {
+      callsQuery = callsQuery.eq('call_type', 'outbound')
+    } else if (callType === "c2c") {
+      callsQuery = callsQuery.eq('call_type', 'outbound_c2c')
+    } else if (callType === "ivr") {
+      callsQuery = callsQuery.eq('call_type', 'ivr')
+    } else if (callType === "inbound") {
+      callsQuery = callsQuery.eq('call_type', 'inbound')
+    } else {
+      callsQuery = callsQuery.in('call_type', ['outbound', 'outbound_c2c'])
+    }
 
       // Execute all 3 queries in parallel!
       const [

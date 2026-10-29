@@ -291,11 +291,14 @@ export function TelecallerLeadsTable({
           <Table>
             <TableHeader className="bg-slate-50 dark:bg-slate-950 sticky top-0 z-10 shadow-sm border-b border-slate-200 dark:border-slate-800">
               <TableRow>
-                <TableHead className="w-[280px] font-bold text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400 py-3.5 pl-4">Quick Dialer</TableHead>
-                <TableHead className="w-[220px] cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800/80 font-bold text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400 py-3.5" onClick={() => handleSort('name')}>
+                <TableHead className="w-[240px] font-bold text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400 py-3.5 pl-4">Quick Dialer</TableHead>
+                <TableHead className="w-[180px] cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800/80 font-bold text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400 py-3.5" onClick={() => handleSort('name')}>
                     <div className="flex items-center">Customer Name <SortIcon field="name"/></div>
                 </TableHead>
-                <TableHead className="w-[140px] font-bold text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400 py-3.5">Status</TableHead>
+                <TableHead className="w-[140px] cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800/80 font-bold text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400 py-3.5" onClick={() => handleSort('created_at')}>
+                    <div className="flex items-center">Created Date <SortIcon field="created_at"/></div>
+                </TableHead>
+                <TableHead className="w-[120px] font-bold text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400 py-3.5">Status</TableHead>
                 <TableHead className="w-[140px] cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800/80 font-bold text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400 py-3.5" onClick={() => handleSort('loan_amount')}>
                     <div className="flex items-center">Amount <SortIcon field="loan_amount"/></div>
                 </TableHead>
@@ -406,6 +409,26 @@ export function TelecallerLeadsTable({
                                 })}
                             </div>
                         )}
+                      </div>
+                    </TableCell>
+
+                    {/* Created Date */}
+                    <TableCell className="text-slate-600 dark:text-slate-400 text-xs py-3 font-medium whitespace-nowrap">
+                      <div className="flex flex-col">
+                        <span className="flex items-center gap-1.5 font-mono text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                          <Calendar className="h-3 w-3 text-indigo-500" />
+                          {new Date(lead.created_at).toLocaleDateString('en-IN', {
+                            day: '2-digit',
+                            month: 'short',
+                            year: 'numeric'
+                          })}
+                        </span>
+                        <span className="text-[10px] text-slate-400 dark:text-slate-500 font-mono pl-4">
+                          {new Date(lead.created_at).toLocaleTimeString('en-IN', {
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })}
+                        </span>
                       </div>
                     </TableCell>
 
@@ -555,11 +578,22 @@ export function TelecallerLeadsTable({
                     )}
                     <ArrowUpRight className="h-3.5 w-3.5 text-slate-400" />
                   </Link>
-                  {lead.company && (
-                    <span className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1">
-                      <Building className="h-3 w-3 text-slate-400" /> {lead.company}
+                  <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 flex-wrap">
+                    {lead.company && (
+                      <span className="flex items-center gap-1">
+                        <Building className="h-3 w-3 text-slate-400" /> {lead.company}
+                      </span>
+                    )}
+                    <span className="text-slate-300 dark:text-slate-700">•</span>
+                    <span className="flex items-center gap-1 font-mono text-[11px] text-indigo-600 dark:text-indigo-400 font-medium">
+                      <Calendar className="h-3 w-3" />
+                      {new Date(lead.created_at).toLocaleDateString('en-IN', {
+                        day: '2-digit',
+                        month: 'short',
+                        year: 'numeric'
+                      })}
                     </span>
-                  )}
+                  </div>
                 </div>
 
                 <Badge variant="outline" className={cn(

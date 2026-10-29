@@ -32,6 +32,7 @@ export function RecentActivity() {
             users!call_logs_user_id_fkey(full_name),
             leads!call_logs_lead_id_fkey(name)
           `)
+          .in("call_type", ["outbound", "outbound_c2c"])
           .order("created_at", { ascending: false })
           .limit(5)
 

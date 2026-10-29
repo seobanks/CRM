@@ -171,6 +171,7 @@ export async function GET(request: Request) {
         .select('user_id, duration_seconds, duration, talk_time_seconds, call_status')
         .eq('tenant_id', tenantId)
         .in('user_id', staffIds)
+        .in('call_type', ['outbound', 'outbound_c2c'])
         .gte('created_at', startOfYesterday)
         .lte('created_at', endOfYesterday)
 
@@ -239,14 +240,7 @@ export async function GET(request: Request) {
         }
       })
 
-      // Ensure count reflects productive lead interactions if calls weren't logged or is lower
-      telecallers.forEach((u: any) => {
-        const s = statsMap[u.id]
-        if (s) {
-          const totalDispositions = s.nr + s.callback + s.interested + s.login + s.notEligible + s.notInterested + s.DISBURSEDCount
-          s.count = Math.max(s.count, totalDispositions)
-        }
-      })
+      // Count strictly reflects outbound and C2C calls logged
 
       // Fill Revenue
       revenueLeads?.forEach((l: any) => {

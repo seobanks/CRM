@@ -1,9 +1,11 @@
 "use client"
 
+import { Label } from "@/components/ui/label"
+
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Search, X, SlidersHorizontal, RefreshCcw, Loader2, Zap, Mic, Sparkles } from "lucide-react"
+import { Search, X, SlidersHorizontal, RefreshCcw, Loader2, Zap, Mic, Sparkles, Calendar } from "lucide-react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useState, useEffect, useTransition } from "react"
 import { Badge } from "@/components/ui/badge"
@@ -18,12 +20,18 @@ export function TelecallerLeadFilters({ initialSearchParams }: { initialSearchPa
   const [search, setSearch] = useState(initialSearchParams.search || "")
   const [status, setStatus] = useState(initialSearchParams.status || "all")
   const [priority, setPriority] = useState(initialSearchParams.priority || "all")
+  const [dateRange, setDateRange] = useState(initialSearchParams.date_range || "all")
+  const [fromDate, setFromDate] = useState(initialSearchParams.from || "")
+  const [toDate, setToDate] = useState(initialSearchParams.to || "")
 
   // Sync state with URL
   useEffect(() => {
     setSearch(searchParams.get("search") || "")
     setStatus(searchParams.get("status") || "all")
     setPriority(searchParams.get("priority") || "all")
+    setDateRange(searchParams.get("date_range") || "all")
+    setFromDate(searchParams.get("from") || "")
+    setToDate(searchParams.get("to") || "")
   }, [searchParams])
 
   const updateFilters = (key: string, value: string) => {
@@ -52,10 +60,56 @@ export function TelecallerLeadFilters({ initialSearchParams }: { initialSearchPa
     })
   }
 
+  const handleDateRangeChange = (val: string) => {
+    setDateRange(val)
+    const params = new URLSearchParams(searchParams.toString())
+    params.set("page", "1")
+    params.delete('mode')
+
+    if (val !== "custom") {
+      if (val && val !== "all") {
+        params.set("date_range", val)
+      } else {
+        params.delete("date_range")
+      }
+      params.delete("from")
+      params.delete("to")
+      setFromDate("")
+      setToDate("")
+    } else {
+      params.set("date_range", "custom")
+    }
+
+    startTransition(() => {
+      router.push(`/telecaller/leads?${params.toString()}`)
+    })
+  }
+
+  const handleCustomDateChange = (field: 'from' | 'to', val: string) => {
+    if (field === 'from') setFromDate(val)
+    if (field === 'to') setToDate(val)
+
+    const params = new URLSearchParams(searchParams.toString())
+    params.set("page", "1")
+    params.set("date_range", "custom")
+    if (val) {
+      params.set(field, val)
+    } else {
+      params.delete(field)
+    }
+
+    startTransition(() => {
+      router.push(`/telecaller/leads?${params.toString()}`)
+    })
+  }
+
   const clearFilters = () => {
     setSearch("")
     setStatus("all")
     setPriority("all")
+    setDateRange("all")
+    setFromDate("")
+    setToDate("")
     startTransition(() => {
       router.push("/telecaller/leads")
     })
@@ -87,7 +141,7 @@ export function TelecallerLeadFilters({ initialSearchParams }: { initialSearchPa
     })
   }
 
-  const hasActiveFilters = status !== "all" || priority !== "all" || search !== "";
+  const hasActiveFilters = status !== "all" || priority !== "all" || search !== "" || (dateRange !== "all" && dateRange !== "");
   const isPowerMode = searchParams.get('mode') === 'power';
 
   return (
@@ -191,6 +245,24 @@ export function TelecallerLeadFilters({ initialSearchParams }: { initialSearchPa
             </SelectContent>
           </Select>
 
+          {/* Date Filter Dropdown */}
+          <Select value={dateRange} onValueChange={handleDateRangeChange}>
+            <SelectTrigger className={cn("w-[150px] bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 rounded-xl h-10 font-medium text-xs shadow-sm", dateRange !== "all" && "border-indigo-500 bg-indigo-50/50 text-indigo-700 dark:bg-indigo-950/20 dark:text-indigo-400 dark:border-indigo-800")}>
+              <div className="flex items-center gap-1.5 truncate">
+                <Calendar className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                <SelectValue placeholder="Created Date" />
+              </div>
+            </SelectTrigger>
+            <SelectContent className="rounded-xl">
+              <SelectItem value="all">All Time</SelectItem>
+              <SelectItem value="today">Today</SelectItem>
+              <SelectItem value="yesterday">Yesterday</SelectItem>
+              <SelectItem value="this_week">Last 7 Days</SelectItem>
+              <SelectItem value="this_month">This Month</SelectItem>
+              <SelectItem value="custom">📅 Custom Range</SelectItem>
+            </SelectContent>
+          </Select>
+
           {/* Filter & Reset Actions */}
           <Button 
             onClick={applySearch} 
@@ -215,6 +287,30 @@ export function TelecallerLeadFilters({ initialSearchParams }: { initialSearchPa
         </div>
       </div>
 
+      {/* Expanded Custom Date Picker Drawer */}
+      {dateRange === "custom" && (
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 p-3 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl w-full sm:w-fit animate-in slide-in-from-top-2 duration-300">
+          <div className="flex items-center gap-2">
+            <Label className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">From:</Label>
+            <Input 
+              type="date" 
+              value={fromDate} 
+              onChange={(e) => handleCustomDateChange('from', e.target.value)} 
+              className="h-8 rounded-lg bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-slate-100 w-[140px]"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <Label className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">To:</Label>
+            <Input 
+              type="date" 
+              value={toDate} 
+              onChange={(e) => handleCustomDateChange('to', e.target.value)} 
+              className="h-8 rounded-lg bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-slate-100 w-[140px]"
+            />
+          </div>
+        </div>
+      )}
+
       {/* ACTIVE FILTER CHIPS */}
       {hasActiveFilters && (
         <div className="flex flex-wrap gap-2 px-1">
@@ -231,6 +327,11 @@ export function TelecallerLeadFilters({ initialSearchParams }: { initialSearchPa
           {search && (
             <Badge variant="secondary" className="px-2.5 py-1 text-[11px] font-medium gap-1.5 cursor-pointer bg-indigo-50 text-indigo-700 border border-indigo-100 dark:bg-indigo-950/30 dark:text-indigo-400 dark:border-indigo-900/40 rounded-lg hover:bg-indigo-100" onClick={() => { setSearch(""); applySearch(); }}>
               Search: <span className="font-bold">"{search}"</span> <X className="h-3 w-3" />
+            </Badge>
+          )}
+          {dateRange && dateRange !== "all" && (
+            <Badge variant="secondary" className="px-2.5 py-1 text-[11px] font-medium gap-1.5 cursor-pointer bg-indigo-50 text-indigo-700 border border-indigo-100 dark:bg-indigo-950/30 dark:text-indigo-400 dark:border-indigo-900/40 rounded-lg hover:bg-indigo-100" onClick={() => handleDateRangeChange('all')}>
+              Date: <span className="font-bold capitalize">{dateRange === 'custom' ? `${fromDate || 'Start'} to ${toDate || 'End'}` : dateRange.replace('_', ' ')}</span> <X className="h-3 w-3" />
             </Badge>
           )}
         </div>

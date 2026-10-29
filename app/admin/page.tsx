@@ -58,7 +58,7 @@ async function DashboardContent() {
     // Fetch ONLY the status column. This is incredibly fast even for 100k+ rows.
     supabase.from("leads").select("status").eq('tenant_id', tenantId),
     supabase.from("users").select("*", { count: "exact", head: true }).eq('tenant_id', tenantId).eq("role", "telecaller").eq("is_active", true),
-    supabase.from("call_logs").select("*", { count: "exact", head: true }).eq('tenant_id', tenantId).gte("created_at", todayStr),
+    supabase.from("call_logs").select("*", { count: "exact", head: true }).eq('tenant_id', tenantId).in('call_type', ['outbound', 'outbound_c2c']).gte("created_at", todayStr),
     supabase.from("leads").select("id, name, created_at, status, score").eq('tenant_id', tenantId).order("created_at", { ascending: false }).limit(5),
     supabase.from("leads").select("id, name, score, status").eq('tenant_id', tenantId).gte('score', 50).order("score", { ascending: false }).limit(5),
   ])

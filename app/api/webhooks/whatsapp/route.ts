@@ -1,6 +1,8 @@
 // app/api/webhooks/whatsapp/route.ts
 import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
+import { checkDailyDocMessageLimit, PERSONAL_LOAN_DOCS_MESSAGE } from "@/lib/whatsapp-rate-limiter";
+import { resolveFonadaAccountId } from "@/app/actions/whatsapp";
 
 export const dynamic = 'force-dynamic';
 
@@ -9,463 +11,579 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY || "placeholder-key"
 );
 
+// Fallback primary tenant ID (BanksCart)
+const DEFAULT_TENANT_ID = "576a6280-a9a2-425c-b1dd-eabfff3a00c6";
+
+// =================================================================================
+// GET: Webhook Verification Handshake & Health Checks
+// =================================================================================
+export async function GET(request: NextRequest) {
+  const searchParams = request.nextUrl.searchParams;
+  const mode = searchParams.get("hub.mode");
+  const token = searchParams.get("hub.verify_token");
+  const challenge = searchParams.get("hub.challenge");
+
+  console.log(`🔔 [WA WEBHOOK GET] Handshake requested. Mode: ${mode}, Token: ${token}, Challenge: ${challenge}`);
+
+  if (challenge) {
+    return new Response(challenge, {
+      status: 200,
+      headers: { "Content-Type": "text/plain" }
+    });
+  }
+
+  return NextResponse.json({
+    status: "success",
+    message: "Fonada WhatsApp Webhook active and verified"
+  });
+}
+
+// =================================================================================
+// POST: Inbound Messages, Button Clicks & Delivery Receipts
+// =================================================================================
 export async function POST(request: NextRequest) {
-  console.log("🔔 [WA WEBHOOK HIT] Received POST request");
+  console.log("🔔 [WA WEBHOOK POST] Received request");
 
   try {
     const searchParams = request.nextUrl.searchParams;
-    const updateType = searchParams.get("type"); 
-    
-    // 🔴 1. THE MULTI-TENANT KEY: Extract the Tenant ID from the URL
-    const tenantId = searchParams.get("tenant_id");
-
-    if (!tenantId) {
-        console.error("🚨 [SECURITY WARNING] WhatsApp Webhook received without a tenant_id in the URL.");
-        return NextResponse.json({ status: "ignored", reason: "missing_tenant_id" });
-    }
+    let tenantId = searchParams.get("tenant_id") || DEFAULT_TENANT_ID;
+    const updateType = searchParams.get("type");
 
     const rawBody = await request.text();
     let body: any = {};
     if (rawBody) {
       try { body = JSON.parse(rawBody); } 
-      catch(e) { body = Object.fromEntries(new URLSearchParams(rawBody)); }
+      catch (e) { body = Object.fromEntries(new URLSearchParams(rawBody)); }
     }
 
-    // 🔴 2. FETCH THIS SPECIFIC COMPANY'S CREDENTIALS
-    let fonadaUser = process.env.FONADA_USERID || "";
-    let fonadaPass = process.env.FONADA_PASSWORD || "";
-    let fonadaWaba = process.env.FONADA_WABA_NUMBER || "";
+    // 0. Acknowledge Fonada Test Pings immediately
+    if (body._test || body._source === "fonada_webhook_test") {
+      console.log("🧪 [WA WEBHOOK] Fonada test ping acknowledged successfully");
+      return NextResponse.json({
+        success: true,
+        test: true,
+        message: "Fonada webhook connection active and verified"
+      });
+    }
 
+    // 1. Fetch credentials for this tenant
     const { data: settings } = await supabase.from('tenant_settings').select('*').eq('tenant_id', tenantId).maybeSingle();
-    const actualUser = settings?.wa_userid || settings?.fonada_userid;
-    const actualPass = settings?.wa_password || settings?.fonada_password;
-    const actualWaba = settings?.wa_waba_number || settings?.fonada_waba_number;
-
-    if (actualUser) fonadaUser = actualUser;
-    if (actualPass) fonadaPass = actualPass;
-    if (actualWaba) fonadaWaba = actualWaba;
-
+    const fonadaUser = settings?.fonada_userid || settings?.wa_userid || process.env.FONADA_USERID || "bankscart";
+    const fonadaPass = settings?.fonada_password || settings?.wa_password || process.env.FONADA_PASSWORD || "zfsWTyKw";
+    const fonadaWaba = settings?.fonada_waba_number || settings?.wa_waba_number || process.env.FONADA_WABA_NUMBER || "918217354172";
+    const bearerToken = settings?.whatsapp_api_key || process.env.FONADA_WHATSAPP_BEARER_TOKEN || "fsk_fa674b9a167787e48b2b29f48939a4570fe02efc1a4ec012c9f60bacc76bc250";
+    const accountId = await resolveFonadaAccountId(bearerToken, fonadaWaba);
 
     // =================================================================================
-    // CASE 1: HANDLE "MO" (Mobile Originated / Customer Reply)
+    // CASE A: DELIVERY RECEIPTS (DLR)
     // =================================================================================
-    if (updateType === 'mo') {
-      
-      let customerPhone = body.mobile || body.sender || body.from || body?.message?.from;
-      let messageText = body.text || body.msg || body.caption || body?.message?.text?.body || body?.message?.document?.caption || body?.message?.image?.caption || "";
-      let mediaUrl = body.imageUrl || body.documentUrl || body.videoUrl || body.mediaUrl || body.media_url || body.MediaUrl0 || body.url || body.fileUrl || body?.message?.document?.link || body?.message?.image?.link || "";
-      
-      let isMedia = !!mediaUrl;
-      if (typeof messageText !== 'string') messageText = JSON.stringify(messageText);
-      if (isMedia && !messageText) messageText = "📎 [Media Attachment]";
-      if (!customerPhone || !messageText) return NextResponse.json({ status: "ignored", reason: "no_data" });
+    const isDlrEvent =
+      updateType === 'dlr' ||
+      body.event_type === 'whatsapp_status_update' ||
+      body.event_type === 'sent' ||
+      body.event_type === 'delivered' ||
+      body.event_type === 'read' ||
+      body.event_type === 'failed' ||
+      (body.status && !body.text && !body.message && !body.data?.button && !body.data?.text);
 
-      let dbPhone = customerPhone.replace(/^\+?91/, '');
-      if (dbPhone.length > 10) dbPhone = dbPhone.slice(-10);
-
-      // 🔴 3. STRICT ISOLATION: Find the lead ONLY within this specific company
-      let { data: lead, error: leadError } = await supabase
-        .from("leads")
-        .select("id, name, assigned_to, notes")
-        .eq("tenant_id", tenantId) // SECURE LOOKUP
-        .ilike("phone", `%${dbPhone}%`)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (leadError) console.error("❌ [DB ERROR] Finding lead:", leadError);
-
-      // 🔴 AUTO-CREATE LEAD IF NOT FOUND
-      if (!lead) {
-          const senderName = body.senderName || body.name || body.fromName || body?.message?.from_name || "WhatsApp Customer";
-          console.log(`🆕 [AUTO-CREATE LEAD] Creating new lead for unregistered number: ${customerPhone} (Tenant: ${tenantId})`);
-          
-          const { data: newLead, error: createError } = await supabase
-            .from("leads")
-            .insert({
-                tenant_id: tenantId,
-                name: senderName,
-                phone: dbPhone,
-                status: "new",
-                source: "other",
-                notes: "🚨 [SYSTEM] Lead automatically created from inbound WhatsApp message."
-            })
-            .select("id, name, assigned_to, notes")
-            .single();
-
-          if (createError) {
-              console.error("❌ [AUTO-CREATE LEAD ERROR] Failed to create lead:", createError);
-          } else if (newLead) {
-              lead = newLead;
-          }
-      }
-
-      let finalContentToSave = messageText; 
-
-      // --- 4. SECURE MEDIA DOWNLOAD USING COMPANY CREDENTIALS ---
-      if (isMedia && lead) {
-          try {
-              const authString = Buffer.from(`${fonadaUser}:${fonadaPass}`).toString('base64');
-              const fetchHeaders = {
-                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-                  'Accept': '*/*',
-                  'Authorization': `Basic ${authString}`
-              };
-
-              let mediaRes = await fetch(mediaUrl, { headers: fetchHeaders });
-              let contentType = mediaRes.headers.get('content-type') || 'application/octet-stream';
-
-              if (contentType.includes('text/html')) {
-                  const htmlContent = await mediaRes.text();
-                  const urlsInHtml = htmlContent.match(/https?:\/\/[^"'\s<>]+/g) || [];
-                  let rawUrl = urlsInHtml.find(u => u !== mediaUrl && (u.toLowerCase().includes('.pdf') || u.includes('download') || u.includes('view-media') || u.includes('media_id')));
-
-                  if (!rawUrl && mediaUrl.includes('view-mediaMeta')) rawUrl = mediaUrl.replace('view-mediaMeta', 'view-media');
-
-                  if (rawUrl) {
-                      if (rawUrl.includes(new URL(mediaUrl).hostname) && !rawUrl.includes('userid=')) {
-                          const joinChar = rawUrl.includes('?') ? '&' : '?';
-                          rawUrl = `${rawUrl}${joinChar}userid=${fonadaUser}&password=${fonadaPass}`;
-                      }
-                      mediaRes = await fetch(rawUrl, { headers: fetchHeaders });
-                      contentType = mediaRes.headers.get('content-type') || '';
-                  }
-              }
-
-              if (contentType.includes('text/html')) {
-                  finalContentToSave = `📁 *Document Link Received:*\n${mediaUrl}`;
-              } else {
-                  const arrayBuffer = await mediaRes.arrayBuffer();
-                  let ext = 'bin';
-                  
-                  const originalName = body.documentName || body.fileName || body?.message?.document?.filename || "";
-                  if (originalName && originalName.includes('.')) ext = originalName.split('.').pop() || 'bin';
-                  else if (mediaUrl.includes('.')) {
-                      const urlMatch = mediaUrl.match(/\.([a-zA-Z0-9]+)(?:&|$)/);
-                      if (urlMatch) ext = urlMatch[1];
-                  }
-                  
-                  if (ext === 'bin' || ext.length > 4) {
-                      const mime = contentType.toLowerCase();
-                      if (mime.includes('pdf')) ext = 'pdf';
-                      else if (mime.includes('jpeg') || mime.includes('jpg')) ext = 'jpg';
-                      else if (mime.includes('png')) ext = 'png';
-                      else ext = mime.split('/')[1]?.split(';')[0] || 'bin';
-                  }
-                  ext = ext.toLowerCase().replace(/[^a-z0-9]/g, '');
-
-                  let finalUploadType = contentType;
-                  if (ext === 'pdf') finalUploadType = 'application/pdf';
-                  if (ext === 'jpg' || ext === 'jpeg') finalUploadType = 'image/jpeg';
-                  if (ext === 'png') finalUploadType = 'image/png';
-
-                  // 🔴 SECURE STORAGE PATH: organized by tenant_id
-                  const fileName = `${tenantId}/${lead.id}/kyc_${Date.now()}.${ext}`;
-
-                  const { error: uploadError } = await supabase.storage
-                      .from('kyc_documents')
-                      .upload(fileName, arrayBuffer, { contentType: finalUploadType, upsert: true });
-
-                  if (uploadError) throw uploadError;
-
-                  const publicUrlData = supabase.storage.from('kyc_documents').getPublicUrl(fileName);
-                  finalContentToSave = `📁 *Document Uploaded:*\n${publicUrlData.data.publicUrl}`;
-              }
-          } catch (err: any) {
-              console.error("❌ [STORAGE ERROR] Failed to process media:", err);
-              finalContentToSave = `📁 *Document Link Received:*\n${mediaUrl}`;
-          }
-      }
-
-      // 5. SAVE INCOMING MESSAGE
-      if (lead) {
-          await supabase.from("chat_messages").insert({
-              tenant_id: tenantId, // 🔴 Force association to this company
-              lead_id: lead.id,
-              phone_number: customerPhone,
-              direction: 'inbound',
-              message_type: isMedia ? 'document' : 'text',
-              content: finalContentToSave,
-              fonada_message_id: body.msgId || null,
-              status: 'received'
-          });
-
-          await supabase.from("leads").update({ 
-                last_message_at: new Date().toISOString(),
-                last_message_content: isMedia ? `📁 Document Received` : messageText.substring(0, 100),
-                last_message_type: 'inbound' 
-          }).eq("id", lead.id);
-
-          await supabase.rpc('increment_unread_count', { row_id: lead.id });
-      }
-
-      // 6. SMART AUTO-REPLY LOGIC (Using Company specific credentials)
-      if (lead) {
-          const textLower = messageText.toLowerCase();
-
-          // LIE-DETECTOR SYSTEM RESCUE OVERRIDE (High priority)
-          if (!isMedia && (textLower === "i am still interested" || textLower.includes("still interested"))) {
-              const rescueMsg = `Thank you for confirming! We apologize for the confusion. A senior executive has been notified and will contact you immediately.`;
-              await sendFonadaMessage(customerPhone, rescueMsg, fonadaUser, fonadaPass, fonadaWaba, lead.id, tenantId);
-              
-              const currentNotes = lead.notes || "";
-              await supabase.from("leads").update({
-                  status: "new", assigned_to: null, 
-                  notes: `${currentNotes}\n\n🚨 [SYSTEM ALERT] Customer clicked "I AM STILL INTERESTED". Lead stripped from agent.`,
-                  last_contacted: new Date().toISOString() 
-              }).eq("id", lead.id);
-              return NextResponse.json({ status: "success", action: "lead_rescued" });
-          }
-
-          // CUSTOMER QUICK REPLIES OVERRIDE (High priority)
-          if (!isMedia) {
-              const isDocRequest = 
-                  textLower.includes("submit details") || 
-                  textLower.includes("what are required documents") || 
-                  textLower.includes("i want to apply personal loan");
-              
-              if (isDocRequest) {
-                  // NOTE: Fonada's dashboard already sends this exact auto-reply via its "Default Response" feature.
-                  // Sending it here via sendFonadaMessage causes the message to be sent twice to the customer.
-                  console.log(`[WA Quick Reply] Document request received from ${customerPhone}. Handled by Fonada Default Response.`);
-                  return NextResponse.json({ status: "success", action: "quick_reply_docs_handled_by_fonada" });
-              }
-
-              const isInterestRequest = 
-                  textLower.includes("what's the interest rate") || 
-                  textLower.includes("whats the interest rate") || 
-                  textLower.includes("what is the interest rate");
-
-              if (isInterestRequest) {
-                  const replyMsg = `Starting From 9.99% so Kindly Share Documents`;
-                  await sendFonadaMessage(customerPhone, replyMsg, fonadaUser, fonadaPass, fonadaWaba, lead.id, tenantId);
-                  return NextResponse.json({ status: "success", action: "quick_reply_interest" });
-              }
-          }
-
-          // AI CHAT AGENT (OpenRouter)
-          if (settings?.whatsapp_ai_agent_enabled) {
-              try {
-                  const apiKey = process.env.OPENROUTER_API_KEY || Buffer.from("c2stb3ItdjEtZDNjYTJhN2U2OTVlNDhmOWVjMDhmZjMzNzFmODZmN2JhZThjYTQ0ZWRkN2JiYjdjMzJmM2VmNjgxM2M2M2YwZA==", "base64").toString("utf-8");
-                  
-                  // Fetch last 15 messages for context
-                  const { data: messages } = await supabase
-                    .from("chat_messages")
-                    .select("direction, content")
-                    .eq("lead_id", lead.id)
-                    .order("created_at", { ascending: true })
-                    .limit(15);
-
-                  const formattedMessages = (messages || []).map(msg => ({
-                    role: msg.direction === 'inbound' ? 'user' : 'assistant',
-                    content: msg.content
-                  }));
-
-                  const systemPrompt = `You are a warm, polite, and highly persuasive WhatsApp assistant for our loan service.
-Your sole goal is to collect the required documents from the customer to complete their loan application.
-
-Current Customer Name: ${lead?.name || "Customer"}
-
-Document Collection Rules:
-1. **Initial Request**: Ask for Aadhar Card, PAN Card, and Salary Slip.
-2. **Fallback for Income Proof**: If the customer replies that their Salary Slip/payslip is NOT available, immediately switch and ask for their *Aadhar Card, PAN Card, and last 3 months Bank Statement* instead.
-3. **Persist on Income Proof**: If the customer has only shared their Aadhar and PAN, you must persistently ask for their Salary Slip (or last 3 months Bank Statement if Salary Slip is not available) until it is received.
-4. **All Documents Received**: If the customer has shared all required documents (either Aadhar + PAN + Salary Slip OR Aadhar + PAN + 3 months Bank Statement), thank them warmly and tell them a representative will contact them shortly. Do NOT ask for any more documents.
-5. **No Documents Attached**: If the customer sends a text message but does not upload the requested documents, immediately and politely insist that they must share the missing documents to proceed.
-
-Communication Style:
-- Keep all messages extremely short, simple, and persuasive (1-2 sentences maximum). Do NOT write paragraphs.
-- Be warm and professional, but remain completely focused on collecting the documents.
-- Any document uploaded by the customer will show up in the chat history as: "📁 Document Uploaded: [URL]" or "📁 Document Link Received: [URL]". Count these as successful uploads.`;
-
-                  const modelsToTry = [
-                    "google/gemma-4-31b-it:free",
-                    "nvidia/nemotron-nano-9b-v2:free",
-                    "liquid/lfm-2.5-1.2b-instruct:free"
-                  ];
-
-                  let aiReply = "";
-                  let lastErr: any = null;
-
-                  for (const model of modelsToTry) {
-                      try {
-                          const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-                            method: "POST",
-                            headers: {
-                              "Authorization": `Bearer ${apiKey}`,
-                              "Content-Type": "application/json",
-                              "HTTP-Referer": "https://hanva-crm.vercel.app",
-                              "X-Title": "Hanva CRM"
-                            },
-                            body: JSON.stringify({
-                              model: model,
-                              messages: [
-                                { role: "system", content: systemPrompt },
-                                ...formattedMessages
-                              ]
-                            })
-                          });
-
-                          if (!response.ok) {
-                            const errText = await response.text();
-                            throw new Error(`OpenRouter API for ${model} responded with status ${response.status}: ${errText}`);
-                          }
-
-                          const resData = await response.json();
-                          
-                          if (resData.error) {
-                            throw new Error(`OpenRouter API for ${model} returned error: ${JSON.stringify(resData.error)}`);
-                          }
-                          
-                          const text = resData.choices?.[0]?.message?.content?.trim();
-                          if (text) {
-                              aiReply = text;
-                              break;
-                          }
-                      } catch (err: any) {
-                          console.warn(`⚠️ [AI AGENT WARNING] Model ${model} failed, trying next:`, err.message || err);
-                          lastErr = err;
-                      }
-                  }
-
-                  if (aiReply) {
-                    await sendFonadaMessage(customerPhone, aiReply, fonadaUser, fonadaPass, fonadaWaba, lead.id, tenantId);
-                    return NextResponse.json({ status: "success", action: "ai_agent_reply" });
-                  } else {
-                    throw lastErr || new Error("All models failed to return a response from OpenRouter");
-                  }
-              } catch (aiError) {
-                  console.error("❌ [AI AGENT ERROR] Failed to process message via OpenRouter:", aiError);
-                  
-                  // Fetch the count of documents uploaded by this customer so far to create a smart context-aware fallback
-                  let docCount = 0;
-                  try {
-                      const { count } = await supabase
-                        .from("chat_messages")
-                        .select("*", { count: "exact", head: true })
-                        .eq("lead_id", lead.id)
-                        .eq("direction", "inbound")
-                        .or("message_type.eq.document,content.ilike.%📁%");
-                      docCount = count || 0;
-                  } catch (cntErr) {
-                      console.error("⚠️ Failed to count documents, defaulting to 0:", cntErr);
-                  }
-
-                  let fallbackMsg = "";
-                  if (isMedia) {
-                      // Customer just sent a document
-                      if (docCount <= 1) {
-                          fallbackMsg = `Thank you for sharing! Please upload your remaining documents (Aadhar Card, PAN Card, or Payslip/Bank Statement) to proceed with your application.`;
-                      } else if (docCount === 2) {
-                          fallbackMsg = `Thank you! Almost done. Please share the final document (Aadhar Card, PAN Card, or Payslip/Bank Statement) so we can submit your application.`;
-                      } else {
-                          fallbackMsg = `Thank you for sharing your documents. We have received them and a representative will contact you shortly.`;
-                      }
-                  } else {
-                      // Customer sent a text message
-                      if (docCount === 0) {
-                          fallbackMsg = `Thank you for your message. To proceed with your loan application, please share clear photos or PDFs of your *Aadhar Card*, *PAN Card*, and *latest Bank Statement/Payslip* here.`;
-                      } else if (docCount < 3) {
-                          fallbackMsg = `Thank you for your message. We are still waiting for your remaining documents (Aadhar Card, PAN Card, or Payslip/Bank Statement). Please share them here to proceed.`;
-                      } else {
-                          fallbackMsg = `Thank you! All documents have been received. Our representative will contact you shortly to complete the process.`;
-                      }
-                  }
-
-                  await sendFonadaMessage(customerPhone, fallbackMsg, fonadaUser, fonadaPass, fonadaWaba, lead.id, tenantId);
-                  return NextResponse.json({ status: "success", action: "ai_agent_fallback_sent" });
-              }
-          }
-
-          // FALLBACK / STANDARD AUTO-REPLY LOGIC (when AI agent is disabled)
-          if (!isMedia) {
-              const isPersonalLoan = textLower.includes("personal loan") || textLower.includes("apply");
-              const isSpeakToAgent = textLower.includes("speak with an agent") || textLower.includes("speak to an agent");
-              const isHelp = textLower.includes("help") || textLower.includes("complete") || textLower.includes("interested");
-
-              if (isPersonalLoan) {
-                // Handled by Fonada Default Response
-                console.log(`[WA Quick Reply] Personal loan inquiry received from ${customerPhone}. Handled by Fonada Default Response.`);
-                return NextResponse.json({ status: "success", action: "pl_handled_by_fonada" });
-              }
-
-              if (isSpeakToAgent || isHelp) {
-                if (lead.assigned_to) {
-                  const { data: agent } = await supabase.from("users").select("full_name, phone").eq("id", lead.assigned_to).maybeSingle();
-                  if (agent && agent.phone) {
-                    const agentMsg = `Our representative *${agent.full_name}* has been assigned to your application.\n\nYou can reach them directly at: *${agent.phone}*`;
-                    await sendFonadaMessage(customerPhone, agentMsg, fonadaUser, fonadaPass, fonadaWaba, lead.id, tenantId);
-                    return NextResponse.json({ status: "success", action: "agent_reply_sent" });
-                  }
-                }
-                const fallbackMsg = `Our team has been notified and a representative will call you shortly.`;
-                await sendFonadaMessage(customerPhone, fallbackMsg, fonadaUser, fonadaPass, fonadaWaba, lead.id, tenantId);
-                return NextResponse.json({ status: "success", action: "fallback_sent" });
-              }
-          }
-      }
-      return NextResponse.json({ status: "success" });
-    }
-
-    // =================================================================================
-    // CASE 2: HANDLE "DLR" (Delivery Reports - Blue Ticks)
-    // =================================================================================
-    if (updateType === 'dlr') {
-      const msgId = body.msgId || body.id;
-      let status = body.status ? body.status.toLowerCase() : 'unknown';
+    if (isDlrEvent) {
+      const msgId = body.data?.waid || body.data?.id || body.msgId || body.id;
+      let status = (body.data?.status || body.status || body.event_type || 'delivered').toLowerCase();
       if (status.includes('deliv')) status = 'delivered';
-      
-      if (msgId && (status === 'delivered' || status === 'read')) {
-          await supabase.from('chat_messages').update({ status: status }).eq('fonada_message_id', msgId);
+      if (status.includes('sent')) status = 'sent';
+      if (status.includes('read')) status = 'read';
+      if (status.includes('fail')) status = 'failed';
+
+      if (msgId && (status === 'delivered' || status === 'read' || status === 'failed' || status === 'sent')) {
+        await supabase.from('chat_messages').update({ status }).eq('fonada_message_id', msgId);
       }
+      return NextResponse.json({ status: "success", type: "dlr" });
+    }
+
+    // =================================================================================
+    // CASE B: META / FONADA CLOUD API STANDARD PAYLOAD (body.entry)
+    // =================================================================================
+    if (body.object === "whatsapp_business_account" || Array.isArray(body.entry)) {
+      console.log("📦 [WA WEBHOOK] Processing Meta / Fonada Cloud API Format");
+
+      for (const entry of body.entry || []) {
+        for (const change of entry.changes || []) {
+          const value = change.value;
+          if (!value) continue;
+
+          // Inbound Messages
+          if (Array.isArray(value.messages)) {
+            for (const msg of value.messages) {
+              const senderPhone = String(msg.from || '').trim();
+              const msgId = msg.id;
+              const msgType = msg.type;
+
+              let messageText = "";
+              let mediaUrl = "";
+
+              if (msgType === "text") {
+                messageText = msg.text?.body || "";
+              } else if (msgType === "interactive") {
+                messageText = msg.interactive?.button_reply?.title || msg.interactive?.button_reply?.id || "[Button Clicked]";
+              } else if (msgType === "button") {
+                messageText = msg.button?.text || msg.button?.payload || "[Button Response]";
+              } else if (msgType === "document") {
+                mediaUrl = msg.document?.link || "";
+                messageText = msg.document?.caption || "📎 [Document Attachment]";
+              } else if (msgType === "image") {
+                mediaUrl = msg.image?.link || "";
+                messageText = msg.image?.caption || "📷 [Image Attachment]";
+              }
+
+              if (!senderPhone || (!messageText && !mediaUrl)) continue;
+
+              await processInboundMessage({
+                customerPhone: senderPhone,
+                messageText,
+                mediaUrl,
+                fonadaMsgId: msgId,
+                tenantId,
+                settings,
+                fonadaUser,
+                fonadaPass,
+                fonadaWaba,
+                bearerToken,
+                accountId
+              });
+            }
+          }
+
+          // DLR updates
+          if (Array.isArray(value.statuses)) {
+            for (const statusItem of value.statuses) {
+              const msgId = statusItem.id;
+              let status = statusItem.status ? statusItem.status.toLowerCase() : "";
+              if (status === "sent" || status === "delivered" || status === "read" || status === "failed") {
+                await supabase.from("chat_messages").update({ status }).eq("fonada_message_id", msgId);
+              }
+            }
+          }
+        }
+      }
+
       return NextResponse.json({ status: "success" });
     }
 
-    return NextResponse.json({ status: "error", message: "Unknown type" }, { status: 400 });
+    // =================================================================================
+    // CASE C: FONADA AI WEBHOOK MANAGER / LEGACY FONADA WEBHOOK
+    // =================================================================================
+    const customerPhone = String(
+      body.data?.from ||
+      body.data?.sender ||
+      body.data?.phone ||
+      body.customer_data?.Phone ||
+      body.customer_data?.phone ||
+      body.data?.recipient_id ||
+      body.mobile ||
+      body.sender ||
+      body.from ||
+      body.message?.from ||
+      ''
+    ).trim();
 
-  } catch (error) {
+    let messageText = String(
+      body.data?.button_reply?.title ||
+      body.data?.button?.text ||
+      body.data?.button ||
+      body.data?.button_clicked ||
+      body.data?.payload ||
+      body.data?.text?.body ||
+      body.data?.text ||
+      body.data?.message ||
+      body.data?.body ||
+      body.text ||
+      body.msg ||
+      body.caption ||
+      body.message?.text?.body ||
+      body.button?.text ||
+      body.button?.payload ||
+      body.button_reply?.title ||
+      body.interactive?.button_reply?.title ||
+      body.payload ||
+      ''
+    ).trim();
+
+    const mediaUrl = String(
+      body.data?.media_url ||
+      body.data?.mediaUrl ||
+      body.data?.imageUrl ||
+      body.data?.documentUrl ||
+      body.data?.url ||
+      body.imageUrl ||
+      body.documentUrl ||
+      body.videoUrl ||
+      body.mediaUrl ||
+      body.media_url ||
+      body.url ||
+      ''
+    ).trim();
+
+    const fonadaMsgId = body.data?.waid || body.data?.id || body.data?.msgId || body.msgId || body.id || null;
+
+    if (customerPhone && (messageText || mediaUrl)) {
+      console.log(`📥 [WA WEBHOOK] Inbound message from ${customerPhone}: "${messageText || mediaUrl}"`);
+      await processInboundMessage({
+        customerPhone,
+        messageText,
+        mediaUrl,
+        fonadaMsgId,
+        tenantId,
+        settings,
+        fonadaUser,
+        fonadaPass,
+        fonadaWaba,
+        bearerToken,
+        accountId
+      });
+
+      return NextResponse.json({ status: "success" });
+    }
+
+    return NextResponse.json({ status: "success", info: "unhandled_or_ack" });
+
+  } catch (error: any) {
     console.error("🔥 [CRITICAL ERROR] Webhook failed:", error);
-    return NextResponse.json({ status: "error" }, { status: 500 });
+    return NextResponse.json({ status: "error", error: error.message }, { status: 500 });
   }
 }
 
 // =================================================================================
-// HELPER: Send Message via Fonada & Save to DB
+// HELPER: Process Inbound Message & Dispatch Auto-Replies
 // =================================================================================
-async function sendFonadaMessage(mobile: string, text: string, userId: string, pass: string, waba: string, leadId: string, tenantId: string) {
-  const apiUrl = "https://waba.fonada.com/api/SendMsgOld"; 
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+async function processInboundMessage({
+  customerPhone,
+  messageText,
+  mediaUrl,
+  fonadaMsgId,
+  tenantId,
+  settings,
+  fonadaUser,
+  fonadaPass,
+  fonadaWaba,
+  bearerToken,
+  accountId
+}: {
+  customerPhone: string;
+  messageText: string;
+  mediaUrl: string;
+  fonadaMsgId: string | null;
+  tenantId: string;
+  settings: any;
+  fonadaUser: string;
+  fonadaPass: string;
+  fonadaWaba: string;
+  bearerToken: string;
+  accountId: string;
+}) {
+  let dbPhone = customerPhone.replace(/^\+?91/, '').replace(/\D/g, '');
+  if (dbPhone.length > 10) dbPhone = dbPhone.slice(-10);
 
-  let safePhone = mobile.replace(/^\+/, '');
+  // 1. Find or auto-create Lead
+  let { data: lead } = await supabase
+    .from("leads")
+    .select("id, name, assigned_to, notes")
+    .eq("tenant_id", tenantId)
+    .ilike("phone", `%${dbPhone}%`)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!lead) {
+    console.log(`🆕 [AUTO-CREATE LEAD] Inbound WA message from ${customerPhone} (Tenant: ${tenantId})`);
+    const { data: newLead } = await supabase
+      .from("leads")
+      .insert({
+        tenant_id: tenantId,
+        name: "WhatsApp Customer",
+        phone: dbPhone,
+        status: "new",
+        source: "whatsapp",
+        notes: "🚨 [SYSTEM] Lead automatically created from inbound WhatsApp message."
+      })
+      .select("id, name, assigned_to, notes")
+      .single();
+    if (newLead) lead = newLead;
+  }
+
+  // 2. Insert into chat_messages
+  const isMedia = !!mediaUrl;
+  await supabase.from("chat_messages").insert({
+    tenant_id: tenantId,
+    lead_id: lead?.id || null,
+    phone_number: customerPhone,
+    direction: "inbound",
+    message_type: isMedia ? "document" : "text",
+    content: isMedia ? `${messageText}\n${mediaUrl}`.trim() : messageText,
+    media_url: mediaUrl || null,
+    fonada_message_id: fonadaMsgId,
+    status: "delivered"
+  });
+
+  // 3. Update lead last message
+  if (lead?.id) {
+    await supabase.from("leads").update({
+      last_message_at: new Date().toISOString(),
+      last_message_content: (messageText || "Media message").substring(0, 100),
+      last_message_type: "inbound"
+    }).eq("id", lead.id);
+
+    // 4. Trigger auto-replies
+    await handleAutoReply({
+      lead,
+      customerPhone,
+      messageText,
+      isMedia,
+      tenantId,
+      settings,
+      fonadaUser,
+      fonadaPass,
+      fonadaWaba,
+      bearerToken,
+      accountId
+    });
+  }
+}
+
+// =================================================================================
+// HELPER: Auto-Reply Handling
+// =================================================================================
+async function handleAutoReply({
+  lead,
+  customerPhone,
+  messageText,
+  isMedia,
+  tenantId,
+  settings,
+  fonadaUser,
+  fonadaPass,
+  fonadaWaba,
+  bearerToken,
+  accountId
+}: any) {
+  if (!lead) return;
+  const textLower = (messageText || "").toLowerCase().trim();
+
+  // 1. LIE-DETECTOR RESCUE OVERRIDE
+  if (!isMedia && (textLower === "i am still interested" || textLower.includes("still interested"))) {
+    const rescueMsg = `Thank you for confirming! We apologize for the confusion. A senior executive has been notified and will contact you immediately.`;
+    await sendFonadaMessage(customerPhone, rescueMsg, fonadaUser, fonadaPass, fonadaWaba, lead.id, tenantId, bearerToken, accountId);
+    
+    const currentNotes = lead.notes || "";
+    await supabase.from("leads").update({
+      status: "new", 
+      assigned_to: null, 
+      notes: `${currentNotes}\n\n🚨 [SYSTEM ALERT] Customer clicked "I AM STILL INTERESTED". Lead stripped from agent.`,
+      last_contacted: new Date().toISOString() 
+    }).eq("id", lead.id);
+    return;
+  }
+
+  // 2. CUSTOMER QUICK REPLIES / PRESET REPLIES / DOCUMENT REQUESTS
+  if (!isMedia) {
+    const isDocRequest = 
+      textLower.includes("submit details") || 
+      textLower.includes("submit") ||
+      textLower.includes("detail") ||
+      textLower.includes("what are required documents") || 
+      textLower.includes("i want to apply personal loan") ||
+      textLower.includes("required documents") ||
+      textLower.includes("documents required") ||
+      textLower.includes("send documents") ||
+      textLower.includes("document") ||
+      textLower.includes("docs") ||
+      textLower.includes("apply") ||
+      textLower.includes("interested") ||
+      textLower.includes("share documents") ||
+      textLower.includes("upload") ||
+      textLower.includes("aadhar") ||
+      textLower.includes("pan") ||
+      textLower.includes("payslip") ||
+      textLower.includes("payload") ||
+      textLower.includes("button") ||
+      textLower === "yes" ||
+      textLower === "hi" ||
+      textLower === "hello" ||
+      textLower === "ok";
+    
+    if (isDocRequest) {
+      // Enforce rate limit: Maximum 2 times per day in this chat
+      const rateLimit = await checkDailyDocMessageLimit(supabase, customerPhone, lead?.id);
+      if (rateLimit.allowed) {
+        console.log(`[WA Quick Reply] Sending Personal Loan docs message to ${customerPhone} (Today count: ${rateLimit.countToday + 1})`);
+        await sendFonadaMessage(customerPhone, PERSONAL_LOAN_DOCS_MESSAGE, fonadaUser, fonadaPass, fonadaWaba, lead?.id, tenantId, bearerToken, accountId);
+      } else {
+        console.log(`[WA Quick Reply] Suppressed for ${customerPhone}: ${rateLimit.reason}`);
+      }
+      return;
+    }
+
+    const isInterestRequest = 
+      textLower.includes("what's the interest rate") || 
+      textLower.includes("whats the interest rate") || 
+      textLower.includes("what is the interest rate");
+
+    if (isInterestRequest) {
+      const replyMsg = `Starting From 9.99% so Kindly Share Documents`;
+      await sendFonadaMessage(customerPhone, replyMsg, fonadaUser, fonadaPass, fonadaWaba, lead.id, tenantId, bearerToken, accountId);
+      return;
+    }
+  }
+
+  // 3. AI CHAT AGENT (if enabled)
+  if (settings?.whatsapp_ai_agent_enabled) {
+    try {
+      const apiKey = process.env.OPENROUTER_API_KEY || "";
+      if (apiKey) {
+        const { data: messages } = await supabase
+          .from("chat_messages")
+          .select("direction, content")
+          .eq("lead_id", lead.id)
+          .order("created_at", { ascending: true })
+          .limit(10);
+
+        const formattedMessages = (messages || []).map(msg => ({
+          role: msg.direction === 'inbound' ? 'user' : 'assistant',
+          content: msg.content
+        }));
+
+        const systemPrompt = `You are a warm and polite assistant for BanksCart. Help the customer complete their loan document verification (PAN, Aadhaar, Payslip). Keep replies under 2 sentences.`;
+
+        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${apiKey}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            model: "google/gemma-4-31b-it:free",
+            messages: [
+              { role: "system", content: systemPrompt },
+              ...formattedMessages
+            ]
+          })
+        });
+
+        if (response.ok) {
+          const resData = await response.json();
+          const aiReply = resData.choices?.[0]?.message?.content?.trim();
+          if (aiReply) {
+            await sendFonadaMessage(customerPhone, aiReply, fonadaUser, fonadaPass, fonadaWaba, lead.id, tenantId, bearerToken, accountId);
+            return;
+          }
+        }
+      }
+    } catch (aiErr) {
+      console.warn("AI Agent reply error:", aiErr);
+    }
+  }
+}
+
+// =================================================================================
+// HELPER: Send Outbound Message via Fonada AI or Legacy SendMsgOld
+// =================================================================================
+async function sendFonadaMessage(
+  mobile: string, 
+  text: string, 
+  userId?: string, 
+  pass?: string, 
+  waba?: string, 
+  leadId?: string | null, 
+  tenantId?: string | null,
+  bearerToken?: string,
+  accountId?: string
+) {
+  let safePhone = String(mobile || '').replace(/^\+/, '').replace(/\D/g, '');
   if (safePhone.length === 10) safePhone = `91${safePhone}`;
 
-  const formData = new FormData();
-  formData.append("userid", userId);
-  formData.append("password", pass);
-  formData.append("wabaNumber", waba);
-  formData.append("mobile", safePhone); 
-  formData.append("msg", text);
-  formData.append("msgType", "text");
-  formData.append("sendMethod", "quick");
-  formData.append("output", "json");
+  const token = bearerToken || process.env.FONADA_WHATSAPP_BEARER_TOKEN || "fsk_fa674b9a167787e48b2b29f48939a4570fe02efc1a4ec012c9f60bacc76bc250";
+  const accId = accountId || await resolveFonadaAccountId(token, waba);
 
+  // 1. Try Fonada AI direct message sender
   try {
-    const res = await fetch(apiUrl, { method: "POST", body: formData });
-    const data = await res.json();
+    const aiRes = await fetch("https://app.fonada.ai/functions/v1/whatsapp_message_sender", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        account_id: accId,
+        to: safePhone,
+        message: {
+          type: "text",
+          text: { body: text }
+        }
+      })
+    });
 
-    if (data.status !== "error") {
-        await supabase.from("chat_messages").insert({
-            tenant_id: tenantId, // 🔴 Ensure outbound auto-replies belong to the tenant
-            lead_id: leadId,
-            phone_number: safePhone,
-            direction: 'outbound',
-            message_type: 'text',
-            content: text,
-            fonada_message_id: data.msgId || null,
-            status: 'sent'
-        });
+    const aiData = await aiRes.json();
+    console.log(`[sendFonadaMessage] Fonada sender response for ${safePhone}:`, JSON.stringify(aiData));
+    if (aiRes.ok && !aiData.error) {
+      const msgId = aiData.data?.message_id || aiData.id || aiData.message_id || `msg_${Date.now()}`;
+      await supabase.from("chat_messages").insert({
+        tenant_id: tenantId,
+        lead_id: leadId,
+        phone_number: safePhone,
+        direction: 'outbound',
+        message_type: 'text',
+        content: text,
+        fonada_message_id: msgId,
+        status: 'sent'
+      });
+
+      if (leadId) {
+        await supabase.from("leads").update({
+          last_message_at: new Date().toISOString(),
+          last_message_content: text.substring(0, 100),
+          last_message_type: 'outbound'
+        }).eq("id", leadId);
+      }
+      console.log(`✅ [WA Quick Reply] Sent docs message to ${safePhone}. Message ID: ${msgId}`);
+      return;
     }
-  } catch (e) {
-    console.error("❌ [FONADA ERROR] Failed to send reply:", e);
+    console.warn("⚠️ [WA Sender] Fonada message sender returned error, trying fallback:", aiData);
+  } catch (e: any) {
+    console.warn("⚠️ Fonada AI auto-reply error, trying legacy fallback:", e?.message || e);
+  }
+
+  // 2. Legacy fallback
+  if (userId && pass) {
+    const apiUrl = "https://waba.fonada.com/api/SendMsgOld"; 
+    process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+
+    const formData = new FormData();
+    formData.append("userid", userId);
+    formData.append("password", pass);
+    formData.append("wabaNumber", waba || "918217354172");
+    formData.append("mobile", safePhone); 
+    formData.append("msg", text);
+    formData.append("msgType", "text");
+    formData.append("sendMethod", "quick");
+    formData.append("output", "json");
+
+    try {
+      const res = await fetch(apiUrl, { method: "POST", body: formData });
+      const data = await res.json();
+      console.log(`[sendFonadaMessage] Legacy response for ${safePhone}:`, JSON.stringify(data));
+      if (data.status !== "error") {
+        await supabase.from("chat_messages").insert({
+          tenant_id: tenantId,
+          lead_id: leadId,
+          phone_number: safePhone,
+          direction: 'outbound',
+          message_type: 'text',
+          content: text,
+          fonada_message_id: data.msgId || null,
+          status: 'sent'
+        });
+      }
+    } catch (err: any) {
+      console.error("❌ Failed legacy auto-reply:", err?.message || err);
+    }
   }
 }

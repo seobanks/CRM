@@ -208,10 +208,21 @@ export async function POST(request: NextRequest) {
                         console.error("[IVR DIGIT] Error tracking IVR lead status:", err);
                     });
 
-                    if (tenantId === '576a6280-a9a2-425c-b1dd-eabfff3a00c6') {
-                        sendStatusUpdateMessage(existingLead.id, dbPhone, tenantId).catch(err => {
+                    if (tenantId) {
+                        try {
+                            const { data: org } = await supabaseAdmin.from('organizations').select('workflow_triggers').eq('id', tenantId).maybeSingle();
+                            const triggers = org?.workflow_triggers || {};
+                            const allowedDigit = triggers.ivr_dtmf_digit || 'any';
+                            const cleanInput = String(digitsPressed).trim();
+                            const cleanAllowed = String(allowedDigit).trim();
+                            const matchesDigit = cleanAllowed === 'any' || cleanAllowed === cleanInput || cleanAllowed.split(',').map((d: string) => d.trim()).includes(cleanInput);
+
+                            if (matchesDigit) {
+                                await sendStatusUpdateMessage(existingLead.id, dbPhone, tenantId, triggers.ivr_dtmf_template, triggers.ivr_dtmf_campaign);
+                            }
+                        } catch (err: any) {
                             console.error("[IVR DIGIT] Failed to send auto WhatsApp:", err);
-                        });
+                        }
                     }
                 }
             } else {
@@ -234,10 +245,21 @@ export async function POST(request: NextRequest) {
                         console.error("[IVR DIGIT] Error tracking IVR lead status:", err);
                     });
 
-                    if (tenantId === '576a6280-a9a2-425c-b1dd-eabfff3a00c6' && newLeadData?.id) {
-                        sendStatusUpdateMessage(newLeadData.id, dbPhone, tenantId).catch(err => {
+                    if (tenantId && newLeadData?.id) {
+                        try {
+                            const { data: org } = await supabaseAdmin.from('organizations').select('workflow_triggers').eq('id', tenantId).maybeSingle();
+                            const triggers = org?.workflow_triggers || {};
+                            const allowedDigit = triggers.ivr_dtmf_digit || 'any';
+                            const cleanInput = String(digitsPressed).trim();
+                            const cleanAllowed = String(allowedDigit).trim();
+                            const matchesDigit = cleanAllowed === 'any' || cleanAllowed === cleanInput || cleanAllowed.split(',').map((d: string) => d.trim()).includes(cleanInput);
+
+                            if (matchesDigit) {
+                                await sendStatusUpdateMessage(newLeadData.id, dbPhone, tenantId, triggers.ivr_dtmf_template, triggers.ivr_dtmf_campaign);
+                            }
+                        } catch (err: any) {
                             console.error("[IVR DIGIT] Failed to send auto WhatsApp:", err);
-                        });
+                        }
                     }
                 }
             }

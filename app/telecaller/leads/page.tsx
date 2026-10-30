@@ -63,9 +63,13 @@ export default async function TelecallerLeadsPage({
     .from("leads")
     .select("*", { count: "exact" })
     .eq("assigned_to", user.id)
-    .order("last_contacted", { ascending: true, nullsFirst: true })  // Never-contacted leads always first
     .order(sortBy, { ascending: sortOrder })
-    .range(from, to)
+
+  if (sortBy !== "created_at") {
+    query = query.order("created_at", { ascending: false })
+  }
+
+  query = query.range(from, to)
 
   if (searchParams.status && searchParams.status !== "all") query = query.eq("status", searchParams.status)
   if (searchParams.priority && searchParams.priority !== "all") query = query.eq("priority", searchParams.priority)

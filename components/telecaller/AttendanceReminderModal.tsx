@@ -128,7 +128,7 @@ export function AttendanceReminderModal({ userId }: AttendanceReminderModalProps
     }
   }, [userId, pathname])
 
-  // Periodic check (every 30 seconds) + on initial mount / route change
+  // Periodic check (every 5 minutes) + on initial mount / route change
   useEffect(() => {
     // Initial check after short delay (let initial layout render smoothly)
     const initialTimer = setTimeout(() => {
@@ -137,7 +137,7 @@ export function AttendanceReminderModal({ userId }: AttendanceReminderModalProps
 
     const interval = setInterval(() => {
       checkAttendance()
-    }, 30000)
+    }, 5 * 60 * 1000)
 
     // Listen for custom attendance-updated events triggered from other components
     const handleAttendanceUpdated = () => {

@@ -88,7 +88,7 @@ export function LiveLeaderboard() {
         // Optimize: Poll every 60 seconds instead of listening to all database changes
         const intervalId = setInterval(() => {
             fetchLeaders();
-        }, 60000);
+        }, 5 * 60 * 1000);
             
         return () => { 
             clearInterval(intervalId);

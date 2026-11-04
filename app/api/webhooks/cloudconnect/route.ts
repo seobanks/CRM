@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { sendStatusUpdateMessage } from '@/app/actions/whatsapp'
 import { recordIvrLeadReceived } from '@/lib/ivr-tracker'
+import { resolveTenantFromDids, extractTenantFromCampaign } from '@/lib/did-registry-cache'
 
 // Helper to lazy-load the Supabase Admin Client to bypass RLS for webhooks
 // This prevents Next.js build-time errors when env variables are missing during static analysis.
@@ -179,32 +180,26 @@ async function handleWebhook(req: Request) {
 
         let matchedDid: string | null = null;
         if (uniqueDids.length > 0) {
-            const { data: didRecords, error: didError } = await supabaseAdmin
-                .from('tenant_did_registry')
-                .select('tenant_id, did_number')
-                .in('did_number', uniqueDids)
-                .eq('is_active', true);
-            
-            console.warn(`🔍 [DID-DEBUG] Registry query result:`, JSON.stringify(didRecords));
-            console.warn(`🔍 [DID-DEBUG] Registry query error:`, didError);
-
-            if (didRecords && didRecords.length > 0) {
-                TARGET_IVR_TENANT_ID = didRecords[0].tenant_id;
-                matchedDid = didRecords[0].did_number;
-                console.warn(`✅ [CloudConnect DID-ROUTE] Found matching DID ${didRecords[0].did_number} → tenant ${TARGET_IVR_TENANT_ID}`);
+            const { tenantId: resolvedTenant, matchedDid: foundDid } = await resolveTenantFromDids(uniqueDids);
+            if (resolvedTenant) {
+                TARGET_IVR_TENANT_ID = resolvedTenant;
+                matchedDid = foundDid;
+                console.warn(`✅ [CloudConnect DID-ROUTE] Found matching DID ${matchedDid} → tenant ${TARGET_IVR_TENANT_ID} (cached)`);
             } else {
-                console.warn(`⚠️ [CloudConnect DID-ROUTE] None of the potential DIDs (${uniqueDids.join(', ')}) were found in registry. Falling back to default tenant.`);
-                // Show all DIDs currently in registry for comparison
-                const { data: allDids } = await supabaseAdmin.from('tenant_did_registry').select('did_number, tenant_id, is_active');
-                console.warn(`🔍 [DID-DEBUG] All DIDs in registry:`, JSON.stringify(allDids));
                 matchedDid = uniqueDids[0] || null;
             }
-        } else {
-            console.warn(`⚠️ [DID-DEBUG] No 10-digit DIDs found to query!`);
         }
-        // ===== END DID ROUTING =====
 
-        // ===== FALLBACK: Agent Extension Routing =====
+        // ===== FALLBACK 1: Campaign Name Embedded UUID =====
+        if (!TARGET_IVR_TENANT_ID) {
+            const campaignTenant = extractTenantFromCampaign(campaignName);
+            if (campaignTenant) {
+                TARGET_IVR_TENANT_ID = campaignTenant;
+                console.warn(`✅ [CloudConnect CAMPAIGN-ROUTE] Resolved tenant ${TARGET_IVR_TENANT_ID} from campaign ${campaignName}`);
+            }
+        }
+
+        // ===== FALLBACK 2: Agent Extension Routing =====
         if (!TARGET_IVR_TENANT_ID && extensionNumber) {
             const cleanExt = extensionNumber.replace(/^\+?\d{1,3}/, '').slice(-10);
             const { data: matchingUsers } = await supabaseAdmin
@@ -221,17 +216,8 @@ async function handleWebhook(req: Request) {
         // ===== END AGENT EXTENSION ROUTING =====
 
         if (!TARGET_IVR_TENANT_ID) {
-            // Safe fallback: Auto-route to BanksCart default tenant if DID is not yet in registry so customer calls are never dropped
-            const { data: defaultOrg } = await supabaseAdmin
-                .from('organizations')
-                .select('id')
-                .eq('is_active', true)
-                .order('created_at', { ascending: true })
-                .limit(1)
-                .maybeSingle();
-
-            TARGET_IVR_TENANT_ID = defaultOrg?.id || '576a6280-a9a2-425c-b1dd-eabfff3a00c6';
-            console.warn(`⚠️ [CloudConnect] Auto-routed unmatched call (DID: ${getParam('did') || campaignName}) to default tenant: ${TARGET_IVR_TENANT_ID}`);
+            TARGET_IVR_TENANT_ID = '576a6280-a9a2-425c-b1dd-eabfff3a00c6';
+            console.warn(`⚠️ [CloudConnect] Auto-routed unmatched call (DID: ${getParam('did') || campaignName}) to default BanksCart tenant: ${TARGET_IVR_TENANT_ID}`);
         }
 
     // 1. Find the Lead

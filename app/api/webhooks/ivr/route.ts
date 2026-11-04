@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 import { sendStatusUpdateMessage } from "@/app/actions/whatsapp";
 import { recordIvrLeadReceived } from "@/lib/ivr-tracker";
+import { resolveTenantFromDids, extractTenantFromCampaign } from "@/lib/did-registry-cache";
 
 export const dynamic = 'force-dynamic';
 
@@ -128,19 +129,22 @@ export async function POST(request: NextRequest) {
 
     let matchedDid: string | null = null;
     if (uniqueDids.length > 0) {
-      const { data: didRecords } = await supabaseAdmin
-        .from('tenant_did_registry')
-        .select('tenant_id, did_number')
-        .in('did_number', uniqueDids)
-        .eq('is_active', true);
-        
-      if (didRecords && didRecords.length > 0) {
-        tenantId = didRecords[0].tenant_id;
-        matchedDid = didRecords[0].did_number;
-        console.log(`✅ [IVR DID-ROUTE] Found matching DID ${didRecords[0].did_number} → tenant ${tenantId}`);
+      const { tenantId: resolvedTenant, matchedDid: foundDid } = await resolveTenantFromDids(uniqueDids);
+      if (resolvedTenant) {
+        tenantId = resolvedTenant;
+        matchedDid = foundDid;
+        console.log(`✅ [IVR DID-ROUTE] Found matching DID ${matchedDid} → tenant ${tenantId} (cached)`);
       } else {
-        console.warn(`⚠️ [IVR DID-ROUTE] None of the potential DIDs (${uniqueDids.join(', ')}) were found in registry. Falling back to manual tenant param.`);
         matchedDid = uniqueDids[0] || null;
+      }
+    }
+
+    // Fallback: extract tenant from CampaignName (e.g. IVRBlast_DID_TENANTUUID)
+    if (!tenantId) {
+      const campaignTenant = extractTenantFromCampaign(body.CampaignName || body.campaignName || campaignName);
+      if (campaignTenant) {
+        tenantId = campaignTenant;
+        console.log(`✅ [IVR CAMPAIGN-ROUTE] Resolved tenant ${tenantId} from campaign: ${campaignName}`);
       }
     }
     // ===== END DID ROUTING =====

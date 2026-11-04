@@ -1,6 +1,7 @@
 "use server"
 
 import { createClient } from "@supabase/supabase-js"
+import { invalidateDidCache } from "@/lib/did-registry-cache"
 
 const getSupabaseAdmin = () => {
     return createClient(
@@ -32,6 +33,7 @@ export async function addDid(tenant_id: string, did_number: string, label: strin
         is_active
     })
     if (error) throw new Error(error.message)
+    invalidateDidCache()
     return true
 }
 
@@ -39,6 +41,7 @@ export async function toggleDidStatus(id: string, is_active: boolean) {
     const supabaseAdmin = getSupabaseAdmin()
     const { error } = await supabaseAdmin.from('tenant_did_registry').update({ is_active }).eq('id', id)
     if (error) throw new Error(error.message)
+    invalidateDidCache()
     return true
 }
 
@@ -46,5 +49,6 @@ export async function deleteDid(id: string) {
     const supabaseAdmin = getSupabaseAdmin()
     const { error } = await supabaseAdmin.from('tenant_did_registry').delete().eq('id', id)
     if (error) throw new Error(error.message)
+    invalidateDidCache()
     return true
 }

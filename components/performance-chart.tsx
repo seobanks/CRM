@@ -52,43 +52,37 @@ export function PerformanceChart({ startDate, endDate, telecallerId, callType = 
           .lte("created_at", `${endDate}T23:59:59`)
           .limit(20000)
 
-        let callsQuery = supabase
-          .from("call_logs")
-          .select("created_at, call_status, disposition, duration_seconds, call_type, notes, leads:leads(status)")
-          .gte("created_at", `${startDate}T00:00:00`)
-          .lte("created_at", `${endDate}T23:59:59`)
-          .limit(20000)
-
-        // Strict Tenant Isolation
         if (tenantId) {
           leadsQuery = leadsQuery.eq('tenant_id', tenantId)
-          callsQuery = callsQuery.eq('tenant_id', tenantId)
         }
-
-        // Call Type Filter
-        if (callType === "outbound") {
-      callsQuery = callsQuery.eq('call_type', 'outbound')
-    } else if (callType === "c2c") {
-      callsQuery = callsQuery.eq('call_type', 'outbound_c2c')
-    } else if (callType === "ivr") {
-      callsQuery = callsQuery.eq('call_type', 'ivr')
-    } else if (callType === "inbound") {
-      callsQuery = callsQuery.eq('call_type', 'inbound')
-    } else if (callType === "all") {
-      // no filter
-    } else {
-      callsQuery = callsQuery.in('call_type', ['outbound', 'outbound_c2c'])
-    }
 
         if (telecallerId) {
           const ids = telecallerId.split(',').filter(Boolean)
-          if (ids.length > 0) {
-            leadsQuery = leadsQuery.in("assigned_to", ids)
-            callsQuery = callsQuery.in("user_id", ids)
-          }
+          if (ids.length > 0) leadsQuery = leadsQuery.in("assigned_to", ids)
         }
 
-        const [{ data: leadsRaw }, { data: callsRaw }] = await Promise.all([leadsQuery, callsQuery])
+        // Fetch calls via server-side deduplicated reports API
+        let callsRaw: any[] = []
+        try {
+          const params = new URLSearchParams({
+            startDate,
+            endDate,
+            callType
+          })
+          if (telecallerId) params.set('telecallerId', telecallerId)
+
+          const res = await fetch(`/api/admin/reports/calls?${params.toString()}`)
+          if (res.ok) {
+            const json = await res.json()
+            callsRaw = json.calls || []
+          } else {
+            console.error("[PerformanceChart] API error:", await res.text())
+          }
+        } catch (fetchErr) {
+          console.error("[PerformanceChart] Error fetching calls API:", fetchErr)
+        }
+
+        const { data: leadsRaw } = await leadsQuery
 
         if (!isMounted) return
 

@@ -131,42 +131,24 @@ export function TelecallerPerformance({ startDate, endDate, telecallerId, callTy
 
         if (!isMounted || !telecallers) return
 
-        const telecallerIds = telecallers.map((t: any) => t.id)
         let calls: any[] = []
-
-        if (telecallerIds.length > 0) {
-          let callsQuery = supabase
-            .from("call_logs")
-            .select("user_id, call_status, duration_seconds, created_at, disposition, call_type, notes, leads:leads(status)")
-            .in("user_id", telecallerIds)
-            .gte("created_at", `${startDate}T00:00:00`)
-            .lte("created_at", `${endDate}T23:59:59`)
-            .limit(20000)
-
-          if (tenantId) {
-            callsQuery = callsQuery.eq("tenant_id", tenantId)
-          }
-
-          // Apply Call Channel Filter
-          if (callType === "outbound") {
-            callsQuery = callsQuery.eq('call_type', 'outbound')
-          } else if (callType === "c2c") {
-            callsQuery = callsQuery.eq('call_type', 'outbound_c2c')
-          } else if (callType === "ivr") {
-            callsQuery = callsQuery.eq('call_type', 'ivr')
-          } else if (callType === "inbound") {
-            callsQuery = callsQuery.eq('call_type', 'inbound')
-          } else if (callType === "all") {
-            // No filter on call_type
+        try {
+          const params = new URLSearchParams({
+            startDate,
+            endDate,
+            callType
+          })
+          if (telecallerId) params.set('telecallerId', telecallerId)
+          
+          const res = await fetch(`/api/admin/reports/calls?${params.toString()}`)
+          if (res.ok) {
+            const json = await res.json()
+            calls = json.calls || []
           } else {
-            callsQuery = callsQuery.in('call_type', ['outbound', 'outbound_c2c'])
+            console.error("[TelecallerPerformance] API error:", await res.text())
           }
-
-          const { data: fetchedCalls, error: callsErr } = await callsQuery
-          if (callsErr) {
-            console.error("[TelecallerPerformance] Error fetching calls:", callsErr)
-          }
-          calls = fetchedCalls || []
+        } catch (fetchErr) {
+          console.error("[TelecallerPerformance] Error fetching calls API:", fetchErr)
         }
 
         const attendanceMap = new Map(attendance?.map((a: any) => [a.user_id, !!a.check_in]))

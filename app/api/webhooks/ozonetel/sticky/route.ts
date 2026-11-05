@@ -19,11 +19,7 @@ async function broadcastScreenPop(supabaseAdmin: any, payload: any) {
   try {
     const channel = supabaseAdmin.channel('cloudconnect_events');
     if (typeof channel.httpSend === 'function') {
-      await channel.httpSend({
-        type: 'broadcast',
-        event: 'SCREEN_POP',
-        payload,
-      });
+      await channel.httpSend('SCREEN_POP', payload);
     } else {
       await channel.send({
         type: 'broadcast',

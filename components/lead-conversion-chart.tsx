@@ -64,7 +64,7 @@ export function LeadConversionChart({ startDate, endDate, telecallerId }: LeadCo
           .lte("created_at", `${endDate}T23:59:59`)
           .limit(10000)
 
-        if (tenantId && role !== 'super_admin') {
+        if (tenantId) {
           query = query.eq('tenant_id', tenantId)
         }
 

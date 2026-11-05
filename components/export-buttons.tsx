@@ -73,7 +73,7 @@ export function ExportButtons({ startDate, endDate, telecallerId, callType = "ag
         .lte("created_at", `${endDate}T23:59:59`)
         .limit(20000)
 
-      if (tenantId && role !== 'super_admin') {
+      if (tenantId) {
         query = query.eq("tenant_id", tenantId)
       }
 
@@ -86,6 +86,7 @@ export function ExportButtons({ startDate, endDate, telecallerId, callType = "ag
       if (error) throw error
 
       if (data) {
+        data.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
         const exportData = data.map((lead: any) => ({
           name: lead.name || "N/A",
           phone: lead.phone || "",
@@ -142,10 +143,10 @@ export function ExportButtons({ startDate, endDate, telecallerId, callType = "ag
         `)
         .gte("created_at", `${startDate}T00:00:00`)
         .lte("created_at", `${endDate}T23:59:59`)
-        .order("created_at", { ascending: false })
+
         .limit(20000)
 
-      if (tenantId && role !== 'super_admin') {
+      if (tenantId) {
         query = query.eq("tenant_id", tenantId)
       }
 
@@ -158,6 +159,8 @@ export function ExportButtons({ startDate, endDate, telecallerId, callType = "ag
       query = query.eq('call_type', 'ivr')
     } else if (callType === "inbound") {
       query = query.eq('call_type', 'inbound')
+    } else if (callType === "all") {
+      // No filter
     } else {
       query = query.in('call_type', ['outbound', 'outbound_c2c'])
     }
@@ -171,6 +174,7 @@ export function ExportButtons({ startDate, endDate, telecallerId, callType = "ag
       if (error) throw error
 
       if (data) {
+        data.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
         const exportData = data.map((call: any) => {
           const status = (call.call_status || "").toLowerCase()
           const disp = (call.disposition || "").toUpperCase()
@@ -244,7 +248,7 @@ export function ExportButtons({ startDate, endDate, telecallerId, callType = "ag
         .select("id, full_name")
         .eq("is_active", true)
 
-      if (tenantId && role !== 'super_admin') {
+      if (tenantId) {
         telecallersQuery = telecallersQuery.eq("tenant_id", tenantId)
       }
 
@@ -263,7 +267,7 @@ export function ExportButtons({ startDate, endDate, telecallerId, callType = "ag
         .lte("created_at", `${endDate}T23:59:59`)
         .limit(20000)
 
-      if (tenantId && role !== 'super_admin') {
+      if (tenantId) {
         leadsQuery = leadsQuery.eq("tenant_id", tenantId)
       }
 
@@ -275,7 +279,7 @@ export function ExportButtons({ startDate, endDate, telecallerId, callType = "ag
         .lte("created_at", `${endDate}T23:59:59`)
         .limit(20000)
 
-      if (tenantId && role !== 'super_admin') {
+      if (tenantId) {
         callsQuery = callsQuery.eq("tenant_id", tenantId)
       }
 

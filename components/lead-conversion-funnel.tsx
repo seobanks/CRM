@@ -55,7 +55,7 @@ export function LeadConversionFunnel({ startDate, endDate, telecallerId }: LeadC
           .lte("created_at", `${endDate}T23:59:59`)
           .limit(10000)
 
-        if (tenantId && role !== 'super_admin') {
+        if (tenantId) {
           leadsQuery = leadsQuery.eq('tenant_id', tenantId)
         }
 

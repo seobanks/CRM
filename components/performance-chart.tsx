@@ -60,7 +60,7 @@ export function PerformanceChart({ startDate, endDate, telecallerId, callType = 
           .limit(20000)
 
         // Strict Tenant Isolation
-        if (tenantId && role !== 'super_admin') {
+        if (tenantId) {
           leadsQuery = leadsQuery.eq('tenant_id', tenantId)
           callsQuery = callsQuery.eq('tenant_id', tenantId)
         }
@@ -74,6 +74,8 @@ export function PerformanceChart({ startDate, endDate, telecallerId, callType = 
       callsQuery = callsQuery.eq('call_type', 'ivr')
     } else if (callType === "inbound") {
       callsQuery = callsQuery.eq('call_type', 'inbound')
+    } else if (callType === "all") {
+      // no filter
     } else {
       callsQuery = callsQuery.in('call_type', ['outbound', 'outbound_c2c'])
     }
@@ -145,6 +147,7 @@ export function PerformanceChart({ startDate, endDate, telecallerId, callType = 
 
           setData(chartData)
         } else {
+
           // --- DAILY BREAKDOWN FOR MULTI-DAY ---
           const dateMap = new Map<string, { leads: number; calls: number; connected: number }>()
           const start = new Date(startDate)

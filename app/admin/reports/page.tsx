@@ -102,7 +102,7 @@ export default async function ReportsPage({
     .eq("role", "telecaller")
     .eq("is_active", true)
 
-  if (tenantId && role !== 'super_admin') {
+  if (tenantId) {
     telecallersQuery = telecallersQuery.eq("tenant_id", tenantId)
   }
 
@@ -124,7 +124,7 @@ export default async function ReportsPage({
       .lte('created_at', `${e}T23:59:59`)
       .limit(20000)
 
-    if (tenantId && role !== 'super_admin') {
+    if (tenantId) {
       leadsQuery = leadsQuery.eq('tenant_id', tenantId)
       callsQuery = callsQuery.eq('tenant_id', tenantId)
     }
@@ -138,6 +138,8 @@ export default async function ReportsPage({
       callsQuery = callsQuery.eq('call_type', 'ivr')
     } else if (callType === "inbound") {
       callsQuery = callsQuery.eq('call_type', 'inbound')
+    } else if (callType === "all") {
+      // no call_type filter
     } else {
       callsQuery = callsQuery.in('call_type', ['outbound', 'outbound_c2c'])
     }
@@ -148,6 +150,9 @@ export default async function ReportsPage({
         leadsQuery = leadsQuery.in('assigned_to', ids)
         callsQuery = callsQuery.in('user_id', ids)
       }
+    } else if (telecallers && telecallers.length > 0 && (callType === 'agent' || !callType)) {
+      const tcIds = telecallers.map((t: any) => t.id)
+      callsQuery = callsQuery.in('user_id', tcIds)
     }
 
     const [{ data: leads }, { data: calls }] = await Promise.all([leadsQuery, callsQuery])

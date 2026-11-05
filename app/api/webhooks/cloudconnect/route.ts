@@ -467,16 +467,6 @@ async function handleWebhook(req: Request) {
 
         let callLogUserId = matchedAgentId || (lead?.assigned_to) || null;
 
-        if (!callLogUserId && TARGET_IVR_TENANT_ID) {
-            const { data: fallbackUser } = await supabaseAdmin
-                .from('users')
-                .select('id')
-                .eq('tenant_id', TARGET_IVR_TENANT_ID)
-                .limit(1)
-                .maybeSingle();
-            callLogUserId = fallbackUser?.id || null;
-        }
-
         if (!callLogUserId) {
             console.warn(`[Ozonetel Webhook] Skipping call_logs save because user_id is required and no agent was matched.`);
             return NextResponse.json({ success: true, message: 'Call processed but skipped call_logs save (No Agent)' });

@@ -45,7 +45,7 @@ export function RevenueForecastChart({ startDate, endDate }: { startDate: string
           .select('disbursed_amount, loan_amount, disbursed_at, created_at, status')
           .limit(10000)
 
-        if (tenantId && role !== 'super_admin') {
+        if (tenantId) {
           query = query.eq('tenant_id', tenantId)
         }
 

@@ -95,7 +95,7 @@ export function TelecallerPerformance({ startDate, endDate, telecallerId, callTy
           .select("id, full_name")
           .eq("is_active", true)
 
-        if (tenantId && role !== 'super_admin') {
+        if (tenantId) {
           userQuery = userQuery.eq("tenant_id", tenantId)
         }
 
@@ -108,7 +108,7 @@ export function TelecallerPerformance({ startDate, endDate, telecallerId, callTy
 
         const today = new Date().toISOString().split('T')[0]
         let attendanceQuery = supabase.from("attendance").select("user_id, check_in").eq("date", today)
-        if (tenantId && role !== 'super_admin') {
+        if (tenantId) {
           attendanceQuery = attendanceQuery.eq("tenant_id", tenantId)
         }
 
@@ -119,43 +119,55 @@ export function TelecallerPerformance({ startDate, endDate, telecallerId, callTy
           .lte("created_at", `${endDate}T23:59:59`)
           .limit(20000)
 
-        if (tenantId && role !== 'super_admin') {
+        if (tenantId) {
           leadsQuery = leadsQuery.eq("tenant_id", tenantId)
         }
-
-        let callsQuery = supabase
-          .from("call_logs")
-          .select("user_id, call_status, duration_seconds, created_at, disposition, call_type, notes, leads:leads(status)")
-          .gte("created_at", `${startDate}T00:00:00`)
-          .lte("created_at", `${endDate}T23:59:59`)
-          .order("created_at", { ascending: false })
-          .limit(20000)
-
-        if (tenantId && role !== 'super_admin') {
-          callsQuery = callsQuery.eq("tenant_id", tenantId)
-        }
-
-        // Apply Call Channel Filter
-        if (callType === "outbound") {
-      callsQuery = callsQuery.eq('call_type', 'outbound')
-    } else if (callType === "c2c") {
-      callsQuery = callsQuery.eq('call_type', 'outbound_c2c')
-    } else if (callType === "ivr") {
-      callsQuery = callsQuery.eq('call_type', 'ivr')
-    } else if (callType === "inbound") {
-      callsQuery = callsQuery.eq('call_type', 'inbound')
-    } else {
-      callsQuery = callsQuery.in('call_type', ['outbound', 'outbound_c2c'])
-    }
 
         const [
           { data: telecallers },
           { data: attendance },
-          { data: leads },
-          { data: calls }
-        ] = await Promise.all([userQuery, attendanceQuery, leadsQuery, callsQuery])
+          { data: leads }
+        ] = await Promise.all([userQuery, attendanceQuery, leadsQuery])
 
         if (!isMounted || !telecallers) return
+
+        const telecallerIds = telecallers.map((t: any) => t.id)
+        let calls: any[] = []
+
+        if (telecallerIds.length > 0) {
+          let callsQuery = supabase
+            .from("call_logs")
+            .select("user_id, call_status, duration_seconds, created_at, disposition, call_type, notes, leads:leads(status)")
+            .in("user_id", telecallerIds)
+            .gte("created_at", `${startDate}T00:00:00`)
+            .lte("created_at", `${endDate}T23:59:59`)
+            .limit(20000)
+
+          if (tenantId) {
+            callsQuery = callsQuery.eq("tenant_id", tenantId)
+          }
+
+          // Apply Call Channel Filter
+          if (callType === "outbound") {
+            callsQuery = callsQuery.eq('call_type', 'outbound')
+          } else if (callType === "c2c") {
+            callsQuery = callsQuery.eq('call_type', 'outbound_c2c')
+          } else if (callType === "ivr") {
+            callsQuery = callsQuery.eq('call_type', 'ivr')
+          } else if (callType === "inbound") {
+            callsQuery = callsQuery.eq('call_type', 'inbound')
+          } else if (callType === "all") {
+            // No filter on call_type
+          } else {
+            callsQuery = callsQuery.in('call_type', ['outbound', 'outbound_c2c'])
+          }
+
+          const { data: fetchedCalls, error: callsErr } = await callsQuery
+          if (callsErr) {
+            console.error("[TelecallerPerformance] Error fetching calls:", callsErr)
+          }
+          calls = fetchedCalls || []
+        }
 
         const attendanceMap = new Map(attendance?.map((a: any) => [a.user_id, !!a.check_in]))
         
@@ -214,11 +226,15 @@ export function TelecallerPerformance({ startDate, endDate, telecallerId, callTy
           const totalCallDuration = userCalls.reduce((sum, call) => sum + (Number(call.duration_seconds) || 0), 0)
           const avgCallDuration = totalCalls > 0 ? totalCallDuration / totalCalls : 0
 
+          let lastCallTime: string | null = null
           let avgTimeBetweenCalls = 0
-          if (userCalls.length > 1) {
-            const sortedTimes = [...userCalls].sort((a,b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
-            const totalGap = new Date(sortedTimes[sortedTimes.length-1].created_at).getTime() - new Date(sortedTimes[0].created_at).getTime()
-            avgTimeBetweenCalls = (totalGap / 1000) / (userCalls.length - 1)
+          if (userCalls.length > 0) {
+            const sortedTimes = [...userCalls].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+            lastCallTime = sortedTimes[0].created_at
+            if (sortedTimes.length > 1) {
+              const totalGap = new Date(sortedTimes[0].created_at).getTime() - new Date(sortedTimes[sortedTimes.length - 1].created_at).getTime()
+              avgTimeBetweenCalls = (totalGap / 1000) / (userCalls.length - 1)
+            }
           }
 
           const connectedCount = userCalls.filter(isCallConnected).length
@@ -251,7 +267,7 @@ export function TelecallerPerformance({ startDate, endDate, telecallerId, callTy
             totalCallDuration,
             avgCallDuration,
             callStatusBreakdown: statusBreakdown,
-            lastCallTime: userCalls.length > 0 ? userCalls[0].created_at : null,
+            lastCallTime,
             avgTimeBetweenCalls
           }
         })

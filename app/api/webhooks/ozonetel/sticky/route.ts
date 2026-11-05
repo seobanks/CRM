@@ -2,11 +2,39 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
 // Helper to lazy-load the Supabase Admin Client to bypass RLS for webhooks
+// Singleton instance prevents allocating thousands of client objects under high webhook load.
+let _cachedAdminClient: any = null;
 const getSupabaseAdmin = () => {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL || '',
-    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
-  )
+  if (!_cachedAdminClient) {
+    _cachedAdminClient = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
+    );
+  }
+  return _cachedAdminClient;
+};
+
+// Safe helper for Realtime broadcast: uses httpSend and cleans up channel immediately to prevent memory leak
+async function broadcastScreenPop(supabaseAdmin: any, payload: any) {
+  try {
+    const channel = supabaseAdmin.channel('cloudconnect_events');
+    if (typeof channel.httpSend === 'function') {
+      await channel.httpSend({
+        type: 'broadcast',
+        event: 'SCREEN_POP',
+        payload,
+      });
+    } else {
+      await channel.send({
+        type: 'broadcast',
+        event: 'SCREEN_POP',
+        payload,
+      });
+    }
+    await supabaseAdmin.removeChannel(channel);
+  } catch (err) {
+    console.error('[Ozonetel Sticky] Error broadcasting pre-ring popup:', err);
+  }
 }
 
 export async function GET(req: Request) {
@@ -79,42 +107,30 @@ async function handleStickyRouting(req: Request) {
             return NextResponse.json({ phone_name: "" });
         }
 
-        // 2. Look up the agent's mobile number and status
+        // 2. Look up the agent's mobile number and status (use maybeSingle to avoid 406 on missing/deleted user)
         const { data: user } = await supabaseAdmin
             .from('users')
             .select('phone, current_status') 
             .eq('id', lead.assigned_to)
-            .single();
+            .maybeSingle();
 
         if (user && user.phone) {
-            // 🔥 Check if agent is actually available to take calls!
-            // If they are offline or on break, do not route the call to them.
+            // Check if agent is actually available to take calls
             if (user.current_status === 'offline' || user.current_status === 'break') {
                 console.warn(`[Ozonetel Sticky] Agent ${lead.assigned_to} is currently '${user.current_status}'. Refusing sticky route so Ozonetel sends call to General Queue.`);
                 return NextResponse.json({ phone_name: "" });
             }
 
-            // 🔥 CRM WORKAROUND: Ozonetel doesn't reliably push Ring events to the Server Webhook.
-            // Since they DO hit this Sticky URL right before calling the agent, we will instantly 
-            // trigger the Screen Pop *here* so the agent sees it 1-2 seconds before their phone rings!
-            try {
-                console.warn(`[Ozonetel Sticky] Broadcasting pre-ring SCREEN_POP for agent: ${lead.assigned_to}`);
-                const channel = supabaseAdmin.channel('cloudconnect_events');
-                await channel.send({
-                    type: 'broadcast',
-                    event: 'SCREEN_POP',
-                    payload: {
-                        call_uuid: getParam('uuid') || getParam('monitorUCID') || `sticky-${Date.now()}`,
-                        extension: user.phone,
-                        target_agent_id: lead.assigned_to,
-                        caller_number: callerNumber,
-                        direction: 'Inbound',
-                        lead: lead
-                    }
-                });
-            } catch (err) {
-                console.error("[Ozonetel Sticky] Failed to broadcast pre-ring popup:", err);
-            }
+            // Broadcast pre-ring screen pop cleanly without channel leak
+            console.warn(`[Ozonetel Sticky] Broadcasting pre-ring SCREEN_POP for agent: ${lead.assigned_to}`);
+            await broadcastScreenPop(supabaseAdmin, {
+                call_uuid: getParam('uuid') || getParam('monitorUCID') || `sticky-${Date.now()}`,
+                extension: user.phone,
+                target_agent_id: lead.assigned_to,
+                caller_number: callerNumber,
+                direction: 'Inbound',
+                lead: lead
+            });
 
             // Return the agent's phone number as 'phone_name' for Ozonetel's skill-based routing
             return NextResponse.json({ phone_name: user.phone });

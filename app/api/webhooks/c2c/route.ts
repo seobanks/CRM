@@ -132,7 +132,7 @@ export async function POST(request: NextRequest) {
             const { data: settings } = await supabaseAdmin.from('tenant_settings')
                 .select('billing_pulse_seconds, credits_per_pulse')
                 .eq('tenant_id', tenantId)
-                .single();
+                .maybeSingle();
 
             const pulseSecs = settings?.billing_pulse_seconds || 15;
             const creditsPerPulse = settings?.credits_per_pulse || 1;

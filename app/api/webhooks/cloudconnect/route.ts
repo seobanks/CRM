@@ -5,12 +5,39 @@ import { recordIvrLeadReceived } from '@/lib/ivr-tracker'
 import { resolveTenantFromDids, extractTenantFromCampaign } from '@/lib/did-registry-cache'
 
 // Helper to lazy-load the Supabase Admin Client to bypass RLS for webhooks
-// This prevents Next.js build-time errors when env variables are missing during static analysis.
+// Singleton instance prevents allocating thousands of client objects under high webhook load.
+let _cachedAdminClient: any = null;
 const getSupabaseAdmin = () => {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL || '',
-    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
-  )
+  if (!_cachedAdminClient) {
+    _cachedAdminClient = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
+    );
+  }
+  return _cachedAdminClient;
+};
+
+// Safe helper for Realtime broadcast: uses httpSend and cleans up channel immediately to prevent memory leak
+async function broadcastScreenPop(supabaseAdmin: any, payload: any) {
+  try {
+    const channel = supabaseAdmin.channel('cloudconnect_events');
+    if (typeof channel.httpSend === 'function') {
+      await channel.httpSend({
+        type: 'broadcast',
+        event: 'SCREEN_POP',
+        payload,
+      });
+    } else {
+      await channel.send({
+        type: 'broadcast',
+        event: 'SCREEN_POP',
+        payload,
+      });
+    }
+    await supabaseAdmin.removeChannel(channel);
+  } catch (err) {
+    console.error('[Ozonetel Webhook] Error broadcasting SCREEN_POP:', err);
+  }
 }
 
 export async function POST(req: Request) {
@@ -366,19 +393,14 @@ async function handleWebhook(req: Request) {
             // Broadcast a popup specifically for the agent who just got assigned this brand-new lead!
             if (targetAgentId) {
                 console.warn(`[Ozonetel Webhook] Broadcasting DTMF auto-assign SCREEN_POP for agent: ${targetAgentId}`);
-                const channel = supabaseAdmin.channel('cloudconnect_events');
-                await channel.send({
-                    type: 'broadcast',
-                    event: 'SCREEN_POP',
-                    payload: {
-                        call_uuid: uuid,
-                        extension: extensionNumber,
-                        target_agent_id: targetAgentId,
-                        caller_number: callerNumber,
-                        direction: callDirection,
-                        lead: lead,
-                        is_dtmf_auto_assign: true
-                    }
+                await broadcastScreenPop(supabaseAdmin, {
+                    call_uuid: uuid,
+                    extension: extensionNumber,
+                    target_agent_id: targetAgentId,
+                    caller_number: callerNumber,
+                    direction: callDirection,
+                    lead: lead,
+                    is_dtmf_auto_assign: true
                 });
             }
 
@@ -437,12 +459,7 @@ async function handleWebhook(req: Request) {
 
         // Broadcast to Supabase Realtime channel
         console.warn(`[Ozonetel Webhook] Broadcasting normal SCREEN_POP event with payload:`, JSON.stringify(payload));
-        const channel = supabaseAdmin.channel('cloudconnect_events');
-        await channel.send({
-            type: 'broadcast',
-            event: 'SCREEN_POP',
-            payload: payload
-        });
+        await broadcastScreenPop(supabaseAdmin, payload);
         
         console.warn(`[Ozonetel Webhook] Ringing event broadcasted successfully.`);
         return NextResponse.json({ success: true, message: 'Ringing event broadcasted' });
@@ -451,13 +468,23 @@ async function handleWebhook(req: Request) {
     // 3. Handle Completed Call / Callback Log (Hangup, Answered, NotAnswered, etc.)
     if (!isRinging) {
         console.warn(`[Ozonetel Webhook] Processing end-of-call log saving. Status: ${callStatus}`);
-        const { data: existingLog } = await supabaseAdmin
-            .from('call_logs')
-            .select('id')
-            .eq('cloudconnect_uuid', uuid)
-            .single();
 
         let callLogUserId = matchedAgentId || (lead?.assigned_to) || null;
+
+        if (!callLogUserId && TARGET_IVR_TENANT_ID) {
+            const { data: fallbackUser } = await supabaseAdmin
+                .from('users')
+                .select('id')
+                .eq('tenant_id', TARGET_IVR_TENANT_ID)
+                .limit(1)
+                .maybeSingle();
+            callLogUserId = fallbackUser?.id || null;
+        }
+
+        if (!callLogUserId) {
+            console.warn(`[Ozonetel Webhook] Skipping call_logs save because user_id is required and no agent was matched.`);
+            return NextResponse.json({ success: true, message: 'Call processed but skipped call_logs save (No Agent)' });
+        }
 
         const logData: any = {
             cloudconnect_uuid: uuid,
@@ -466,11 +493,8 @@ async function handleWebhook(req: Request) {
             call_status: (callStatus || 'completed').toLowerCase(),
             duration_seconds: callDurationSeconds,
             notes: `Ozonetel Call (${callStatus || 'Completed'}). Agent: ${extensionNumber}`,
+            user_id: callLogUserId,
         };
-
-        if (callLogUserId) {
-            logData.user_id = callLogUserId;
-        }
 
         if (recordingUrl) {
             logData.recording_url = recordingUrl;
@@ -488,37 +512,20 @@ async function handleWebhook(req: Request) {
             console.warn(`[Ozonetel Webhook] No lead found to attach this call log to.`);
         }
 
-        let savedCallLogId = existingLog?.id || null;
+        // Atomic Upsert: replaces separate SELECT (which threw 428k HTTP 406 errors) and INSERT (which caused duplicate key errors).
+        // Uses onConflict: 'cloudconnect_uuid' to insert or update in a single atomic database operation.
+        let savedCallLogId: string | null = null;
+        const { data: upsertedData, error: upsertError } = await supabaseAdmin
+            .from('call_logs')
+            .upsert(logData, { onConflict: 'cloudconnect_uuid' })
+            .select('id')
+            .maybeSingle();
 
-        if (existingLog) {
-            console.warn(`[Ozonetel Webhook] Updating existing call log ID: ${existingLog.id}`);
-            const { error: updateError } = await supabaseAdmin.from('call_logs').update(logData).eq('id', existingLog.id);
-            if (updateError) console.error(`[Ozonetel Webhook] Error updating call log:`, updateError);
-        } else {
-            if (!callLogUserId && TARGET_IVR_TENANT_ID) {
-                const { data: fallbackUser } = await supabaseAdmin
-                    .from('users')
-                    .select('id')
-                    .eq('tenant_id', TARGET_IVR_TENANT_ID)
-                    .limit(1)
-                    .maybeSingle();
-                callLogUserId = fallbackUser?.id || null;
-                if (callLogUserId) {
-                    logData.user_id = callLogUserId;
-                }
-            }
-
-            if (!callLogUserId) {
-                console.warn(`[Ozonetel Webhook] Skipping call_logs insert because user_id is required and no agent was matched.`);
-                return NextResponse.json({ success: true, message: 'Call processed but skipped call_logs insert (No Agent)' });
-            }
-            console.warn(`[Ozonetel Webhook] Inserting new call log.`);
-            const { data: insertedData, error: insertError } = await supabaseAdmin.from('call_logs').insert([logData]).select('id').single();
-            if (insertError) {
-                console.error(`[Ozonetel Webhook] Error inserting call log:`, insertError);
-            } else if (insertedData) {
-                savedCallLogId = insertedData.id;
-            }
+        if (upsertError) {
+            console.error(`[Ozonetel Webhook] Error upserting call log:`, upsertError);
+        } else if (upsertedData) {
+            savedCallLogId = upsertedData.id;
+            console.warn(`[Ozonetel Webhook] Successfully upserted call log ID: ${savedCallLogId}`);
         }
 
         // 🔴 4. CREDIT DEDUCTION FOR CONNECTED OZONETEL CALLS (1.3 credits per connected call)
